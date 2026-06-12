@@ -25,7 +25,7 @@ export type Para = {
   font?: string;
   spaceAfterPt?: number;
   // Dotted path (relative to the slide) of the deck field this text came from.
-  // Present => the preview renders it inline-editable. Single-run paragraphs only.
+  // Present => the preview renders it inline-editable (rich text, multiple runs).
   source?: string;
 };
 

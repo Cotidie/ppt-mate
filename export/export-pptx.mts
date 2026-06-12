@@ -8,7 +8,7 @@ import { dirname, resolve as pathResolve } from "node:path";
 import pptxgen from "pptxgenjs";
 import type { Deck } from "../src/model/deck";
 import { resolveSlide } from "../src/layout/resolve";
-import type { Element, Para } from "../src/layout/element";
+import type { Element, Para, Run } from "../src/layout/element";
 import { theme } from "../src/theme/theme";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -75,7 +75,7 @@ function addRectEl(
 }
 
 function runsToTextProps(
-  runs: { text: string; bold?: boolean; italic?: boolean; underline?: boolean; color?: string; highlight?: string }[],
+  runs: Run[],
   fallback: { color?: string; bold?: boolean; italic?: boolean }
 ): pptxgen.TextProps[] {
   return runs.map((r) => ({
