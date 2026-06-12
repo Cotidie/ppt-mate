@@ -1,13 +1,9 @@
 import type { Theme } from "../../theme/theme";
-import type { Element, TableCell } from "../element";
-import { CANVAS, header, footer } from "../shared";
+import type { Element, TableCellEl } from "../element";
+import { CANVAS, header, footer, spansToRuns } from "../shared";
 
 type TableSlide = Extract<import("../../model/deck").Slide, { layout: "table" }>;
 
-const cellColor = (c: "green" | "red" | undefined, t: Theme): string | undefined =>
-  c === "green" ? t.colors.green : c === "red" ? t.colors.red : undefined;
-
-// Header + optional centered verdict line + full-width color-coded table.
 export function resolveTable(s: TableSlide, t: Theme, footerText: string): Element[] {
   const { elements, contentTop } = header(t, s.title, s.kicker);
   const els: Element[] = [...elements];
@@ -24,7 +20,7 @@ export function resolveTable(s: TableSlide, t: Theme, footerText: string): Eleme
       y: top,
       w,
       h,
-      paragraphs: [{ runs: [{ text: s.verdict, bold: true }], source: "verdict" }],
+      paragraphs: [{ runs: spansToRuns(s.verdict), bold: true, source: "verdict" }],
       font: t.fonts.title,
       size: t.type.body + 4,
       color: t.colors.textPrimary,
@@ -35,10 +31,14 @@ export function resolveTable(s: TableSlide, t: Theme, footerText: string): Eleme
   }
 
   const bottomLimit = CANVAS.h - t.margin.bottom - t.layout.footerH - 0.3;
-  const rows: TableCell[][] = s.rows.map((r, ri) =>
-    r.cells.map((text, ci) => ({
-      text,
-      color: cellColor(r.cellColors?.[ci], t),
+
+  const columns: TableCellEl[] = s.columns.map((c, ci) => ({
+    runs: spansToRuns(c),
+    source: `columns.${ci}`,
+  }));
+  const rows: TableCellEl[][] = s.rows.map((r, ri) =>
+    r.cells.map((cell, ci) => ({
+      runs: spansToRuns(cell),
       source: `rows.${ri}.cells.${ci}`,
     }))
   );
@@ -49,8 +49,7 @@ export function resolveTable(s: TableSlide, t: Theme, footerText: string): Eleme
     y: top,
     w,
     h: bottomLimit - top,
-    columns: s.columns,
-    columnSources: s.columns.map((_, i) => `columns.${i}`),
+    columns,
     rows,
     headerFill: t.colors.cardHeader,
     headerColor: t.colors.white,

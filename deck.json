@@ -7,156 +7,415 @@
     {
       "id": "cover",
       "layout": "cover",
-      "kicker": "AI Ethics - Team 15",
-      "title": "(Progress) SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models",
-      "citation": "Manakul, P., Liusie, A., & Gales, M. J. F. (2023). SelfCheckGPT: Zero-resource black-box hallucination detection for generative large language models. arXiv.",
+      "kicker": [
+        {
+          "text": "AI Ethics - Team 15"
+        }
+      ],
+      "title": [
+        {
+          "text": "(Progress) SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models"
+        }
+      ],
+      "citation": [
+        {
+          "text": "Manakul, P., Liusie, A., & Gales, M. J. F. (2023). SelfCheckGPT: Zero-resource black-box hallucination detection for generative large language models. arXiv."
+        }
+      ],
       "authors": [
-        "Youngmin Im (20253647)",
-        "Wonseok Jang (20254531)",
-        "Soyeon Park (20230280)",
-        "Mariana Cuevas (20254746)"
+        [
+          {
+            "text": "Youngmin Im (20253647)"
+          }
+        ],
+        [
+          {
+            "text": "Wonseok Jang (20254531)"
+          }
+        ],
+        [
+          {
+            "text": "Soyeon Park (20230280)"
+          }
+        ],
+        [
+          {
+            "text": "Mariana Cuevas (20254746)"
+          }
+        ]
       ]
     },
     {
       "id": "task-division",
       "layout": "comparison",
-      "kicker": "Replication Approach",
-      "title": "Task division: Team 1 & Team 2",
+      "kicker": [
+        {
+          "text": "Replication Approach"
+        }
+      ],
+      "title": [
+        {
+          "text": "Task division: Team 1 & Team 2"
+        }
+      ],
       "cards": [
         {
-          "header": "Grey LLM Team - Passages 1-119",
+          "header": [
+            {
+              "text": "Grey LLM Team - Passages 1-119"
+            }
+          ],
           "bullets": [
             {
-              "text": "Reuse original main passage"
+              "runs": [
+                {
+                  "text": "Reuse original main passage"
+                }
+              ]
             },
             {
-              "text": "Resample with GPT-3.5 Turbo, N=10"
+              "runs": [
+                {
+                  "text": "Resample with GPT-3.5 Turbo, N=10"
+                }
+              ]
             },
             {
-              "text": "Observe Log Probs",
+              "runs": [
+                {
+                  "text": "Observe Log Probs"
+                }
+              ],
               "level": 1
             },
             {
-              "text": "Run NLI + BERTScore"
+              "runs": [
+                {
+                  "text": "Run NLI + BERTScore"
+                }
+              ]
             },
             {
-              "text": "NLI: DeBERTa-v2",
+              "runs": [
+                {
+                  "text": "NLI: DeBERTa-v2"
+                }
+              ],
               "level": 1
             },
             {
-              "text": "BERT: RoBERTa",
+              "runs": [
+                {
+                  "text": "BERT: RoBERTa"
+                }
+              ],
               "level": 1
             }
           ]
         },
         {
-          "header": "Local LLM Team - Passages 1-238",
+          "header": [
+            {
+              "text": "Local LLM Team - Passages 1-238"
+            }
+          ],
           "bullets": [
             {
-              "text": "Run Prompt variant"
+              "runs": [
+                {
+                  "text": "Run Prompt variant"
+                }
+              ]
             },
             {
-              "text": "1908 sentences x 20 samples = 38160 API calls",
+              "runs": [
+                {
+                  "text": "1908 sentences x 20 samples = 38160 API calls"
+                }
+              ],
               "level": 1
             },
             {
-              "text": "Test multiple local LLMs"
+              "runs": [
+                {
+                  "text": "Test multiple local LLMs"
+                }
+              ]
             },
             {
-              "text": "Qwen3.5 9B",
+              "runs": [
+                {
+                  "text": "Qwen3.5 9B"
+                }
+              ],
               "level": 1
             },
             {
-              "text": "Qwen3.5 9B Q8",
+              "runs": [
+                {
+                  "text": "Qwen3.5 9B Q8"
+                }
+              ],
               "level": 1
             },
             {
-              "text": "Gemma4 8B Q4",
+              "runs": [
+                {
+                  "text": "Gemma4 8B Q4"
+                }
+              ],
               "level": 1
             }
           ]
         }
       ],
-      "note": "Both teams share the original human annotations as ground truth for evaluation."
+      "note": [
+        {
+          "text": "Both teams share the original human annotations as ground truth for evaluation."
+        }
+      ]
     },
     {
       "id": "issue-budget",
       "layout": "body",
-      "kicker": "Replication Issues",
-      "title": "Issue: API & Compute budget",
+      "kicker": [
+        {
+          "text": "Replication Issues"
+        }
+      ],
+      "title": [
+        {
+          "text": "Issue: API & Compute budget"
+        }
+      ],
       "bullets": [
         {
-          "text": "BERT / NLI scoring on Colab CPU => slow & unstable",
-          "emphasis": "red"
+          "runs": [
+            {
+              "text": "BERT / NLI scoring on Colab CPU => slow & unstable",
+              "color": "#D64545",
+              "bold": true
+            }
+          ]
         },
         {
-          "text": "Generating N = 20 samples x 238 passages => expensive",
-          "emphasis": "red"
+          "runs": [
+            {
+              "text": "Generating N = 20 samples x 238 passages => expensive",
+              "color": "#D64545",
+              "bold": true
+            }
+          ]
         },
         {
-          "text": "What we did: reduced N from 20 to 10",
-          "emphasis": "green"
+          "runs": [
+            {
+              "text": "What we did: reduced N from 20 to 10",
+              "color": "#1F9D55",
+              "bold": true
+            }
+          ]
         },
         {
-          "text": "Sample-size curve plateaus early, so fewer samples keep the signal",
+          "runs": [
+            {
+              "text": "Sample-size curve plateaus early, so fewer samples keep the signal"
+            }
+          ],
           "level": 1
         }
       ],
-      "note": "Reduce sample size to balance cost and feasibility."
+      "note": [
+        {
+          "text": "Reduce sample size to balance cost and feasibility."
+        }
+      ]
     },
     {
       "id": "small-models",
       "layout": "table",
-      "kicker": "Replication Result",
-      "title": "Better Results on Recent Small Models",
-      "verdict": "Local sub-9B judges match the paper",
+      "kicker": [
+        {
+          "text": "Replication Result"
+        }
+      ],
+      "title": [
+        {
+          "text": "Better Results on Recent Small Models"
+        }
+      ],
+      "verdict": [
+        {
+          "text": "Local sub-9B judges match the paper"
+        }
+      ],
       "columns": [
-        "Judge LLM",
-        "NonFact",
-        "NonFact*",
-        "Factual",
-        "Pearson",
-        "Spearman"
+        [
+          {
+            "text": "Judge LLM"
+          }
+        ],
+        [
+          {
+            "text": "NonFact"
+          }
+        ],
+        [
+          {
+            "text": "NonFact*"
+          }
+        ],
+        [
+          {
+            "text": "Factual"
+          }
+        ],
+        [
+          {
+            "text": "Pearson"
+          }
+        ],
+        [
+          {
+            "text": "Spearman"
+          }
+        ]
       ],
       "rows": [
         {
           "cells": [
-            "Qwen3.5-9B Q8",
-            "93.24",
-            "65.80",
-            "74.66",
-            "75.26",
-            "76.02"
+            [
+              {
+                "text": "Qwen3.5-9B Q8"
+              }
+            ],
+            [
+              {
+                "text": "93.24"
+              }
+            ],
+            [
+              {
+                "text": "65.80"
+              }
+            ],
+            [
+              {
+                "text": "74.66"
+              }
+            ],
+            [
+              {
+                "text": "75.26"
+              }
+            ],
+            [
+              {
+                "text": "76.02"
+              }
+            ]
           ]
         },
         {
           "cells": [
-            "Qwen3.5-9B",
-            "92.56",
-            "65.13",
-            "72.57",
-            "71.51",
-            "72.81"
+            [
+              {
+                "text": "Qwen3.5-9B"
+              }
+            ],
+            [
+              {
+                "text": "92.56"
+              }
+            ],
+            [
+              {
+                "text": "65.13"
+              }
+            ],
+            [
+              {
+                "text": "72.57"
+              }
+            ],
+            [
+              {
+                "text": "71.51"
+              }
+            ],
+            [
+              {
+                "text": "72.81"
+              }
+            ]
           ]
         },
         {
           "cells": [
-            "Gemma-31B",
-            "93.15",
-            "64.51",
-            "72.40",
-            "74.06",
-            "74.60"
+            [
+              {
+                "text": "Gemma-31B"
+              }
+            ],
+            [
+              {
+                "text": "93.15"
+              }
+            ],
+            [
+              {
+                "text": "64.51"
+              }
+            ],
+            [
+              {
+                "text": "72.40"
+              }
+            ],
+            [
+              {
+                "text": "74.06"
+              }
+            ],
+            [
+              {
+                "text": "74.60"
+              }
+            ]
           ]
         },
         {
           "cells": [
-            "Paper (ChatGPT)",
-            "93.42",
-            "53.19",
-            "67.09",
-            "78.32",
-            "78.30"
+            [
+              {
+                "text": "Paper (ChatGPT)"
+              }
+            ],
+            [
+              {
+                "text": "93.42"
+              }
+            ],
+            [
+              {
+                "text": "53.19"
+              }
+            ],
+            [
+              {
+                "text": "67.09"
+              }
+            ],
+            [
+              {
+                "text": "78.32"
+              }
+            ],
+            [
+              {
+                "text": "78.30"
+              }
+            ]
           ]
         }
       ],
@@ -165,8 +424,16 @@
     {
       "id": "closing",
       "layout": "closing",
-      "title": "Thank You!",
-      "subtitle": "For listening and paying attention",
+      "title": [
+        {
+          "text": "Thank You!"
+        }
+      ],
+      "subtitle": [
+        {
+          "text": "For listening and paying attention"
+        }
+      ],
       "navLabel": "last"
     }
   ]

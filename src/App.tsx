@@ -158,8 +158,12 @@ function snapWidth(px: number): number {
   return Math.max(RAIL_MIN, Math.min(RAIL_MAX, px));
 }
 
+function richTextToPlain(rt: import("./model/deck").RichText): string {
+  return rt.map((span) => span.text).join("");
+}
+
 function labelOf(s: Deck["slides"][number]): string {
-  return s.navLabel ?? s.title;
+  return s.navLabel ?? richTextToPlain(s.title);
 }
 
 // Persists a sidebar-only rename to deck.json; the file write triggers Vite HMR,
@@ -181,7 +185,7 @@ async function deleteSlide(slide: Deck["slides"][number], count: number): Promis
     alert("Cannot delete the last slide.");
     return;
   }
-  if (!confirm(`Delete slide "${slide.title}"?`)) return;
+  if (!confirm(`Delete slide "${richTextToPlain(slide.title)}"?`)) return;
   const res = await fetch("/api/slides/delete", {
     method: "POST",
     headers: { "content-type": "application/json" },

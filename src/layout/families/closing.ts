@@ -1,11 +1,10 @@
 import type { Theme } from "../../theme/theme";
 import { ptToIn } from "../../theme/theme";
 import type { Element } from "../element";
-import { CANVAS, footer } from "../shared";
+import { CANVAS, footer, spansToRuns } from "../shared";
 
 type Closing = Extract<import("../../model/deck").Slide, { layout: "closing" }>;
 
-// Centered headline in brand blue, gray subtitle, short green accent rule.
 export function resolveClosing(s: Closing, t: Theme, footerText: string): Element[] {
   const els: Element[] = [];
   const w = CANVAS.w - t.margin.x * 2;
@@ -20,7 +19,7 @@ export function resolveClosing(s: Closing, t: Theme, footerText: string): Elemen
     y: cy,
     w,
     h: titleH,
-    paragraphs: [{ runs: [{ text: s.title, bold: true }], source: "title" }],
+    paragraphs: [{ runs: spansToRuns(s.title), bold: true, source: "title" }],
     font: t.fonts.title,
     size: t.type.closingTitle,
     color: t.colors.brand,
@@ -37,7 +36,7 @@ export function resolveClosing(s: Closing, t: Theme, footerText: string): Elemen
       y,
       w,
       h,
-      paragraphs: [{ runs: [{ text: s.subtitle }], source: "subtitle" }],
+      paragraphs: [{ runs: spansToRuns(s.subtitle), source: "subtitle" }],
       font: t.fonts.body,
       size: t.type.body + 1,
       color: t.colors.textSecondary,
@@ -47,7 +46,6 @@ export function resolveClosing(s: Closing, t: Theme, footerText: string): Elemen
     y += h + 0.15;
   }
 
-  // short centered green accent rule (rendered as a thin rect)
   const ruleW = 1.2;
   els.push({
     kind: "rect",

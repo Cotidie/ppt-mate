@@ -1,33 +1,32 @@
 // Shared layout helpers used by every family resolver: the persistent header
-// (kicker + title, top-left) and the centered footer band. Keeps zone geometry
-// identical across slides per DESIGN.md flow architecture.
+// (kicker + title, top-left) and the centered footer band.
 
 import type { Theme } from "../theme/theme";
 import { ptToIn } from "../theme/theme";
-import type { Element, Para, TextEl } from "./element";
-import type { Bullet, Emphasis } from "../model/deck";
+import type { Element, Para, Run, TextEl } from "./element";
+import type { Span, Bullet } from "../model/deck";
 
 export const CANVAS = { w: 13.333, h: 7.5 };
 
-export function emphasis(e: Emphasis | undefined, t: Theme): { color?: string; bold?: boolean } {
-  switch (e) {
-    case "green":
-      return { color: t.colors.green, bold: true };
-    case "red":
-      return { color: t.colors.red, bold: true };
-    case "bold":
-      return { bold: true };
-    default:
-      return {};
-  }
+// Stored spans -> resolved runs. An empty field becomes one empty run so the
+// renderers always have something to lay out.
+export function spansToRuns(spans: Span[]): Run[] {
+  if (!spans.length) return [{ text: "" }];
+  return spans.map((s) => ({
+    text: s.text,
+    bold: s.bold,
+    italic: s.italic,
+    underline: s.underline,
+    color: s.color,
+    highlight: s.highlight,
+  }));
 }
 
 // Header zone: gray kicker then bold navy title, both anchored to the left margin.
-// Returns the elements plus the y where the content zone can begin.
 export function header(
   t: Theme,
-  title: string,
-  kicker?: string,
+  title: Span[],
+  kicker?: Span[],
   opts?: { titleSize?: number; titleColor?: string }
 ): { elements: Element[]; contentTop: number } {
   const x = t.margin.x;
@@ -42,7 +41,7 @@ export function header(
       y,
       w,
       h: ptToIn(t.type.kicker) * 1.4,
-      paragraphs: [{ runs: [{ text: kicker }], source: "kicker" }],
+      paragraphs: [{ runs: spansToRuns(kicker), source: "kicker" }],
       font: t.fonts.body,
       size: t.type.kicker,
       color: t.colors.kicker,
@@ -53,14 +52,14 @@ export function header(
   }
 
   const titleSize = opts?.titleSize ?? t.type.title;
-  const titleH = ptToIn(titleSize) * 2.2; // room for up to ~2 lines
+  const titleH = ptToIn(titleSize) * 2.2;
   els.push({
     kind: "text",
     x,
     y,
     w,
     h: titleH,
-    paragraphs: [{ runs: [{ text: title, bold: true }], source: "title" }],
+    paragraphs: [{ runs: spansToRuns(title), bold: true, source: "title" }],
     font: t.fonts.title,
     size: titleSize,
     color: opts?.titleColor ?? t.colors.textPrimary,
@@ -72,7 +71,7 @@ export function header(
   return { elements: els, contentTop: y + titleH + 0.15 };
 }
 
-// Centered copyright footer, present on (nearly) every slide.
+// Centered copyright footer (plain string; not user-editable).
 export function footer(t: Theme, text: string): TextEl {
   return {
     kind: "text",
@@ -89,8 +88,7 @@ export function footer(t: Theme, text: string): TextEl {
   };
 }
 
-// Turn deck bullets into one text element with one paragraph per bullet so both
-// renderers wrap natively (no manual y-stepping, no overlap on wrap).
+// One text element, one paragraph per bullet, so both renderers wrap natively.
 export function bulletsElement(
   bullets: Bullet[],
   t: Theme,
@@ -99,17 +97,14 @@ export function bulletsElement(
 ): TextEl {
   const size = opts?.size ?? t.type.body;
   const prefix = opts?.sourcePrefix ?? "bullets";
-  const paragraphs: Para[] = bullets.map((b, i) => {
-    const em = emphasis(b.emphasis, t);
-    return {
-      runs: [{ text: b.text, bold: em.bold, color: em.color }],
-      bullet: true,
-      indentLevel: b.level ?? 0,
-      spaceAfterPt: 6,
-      align: "left",
-      source: `${prefix}.${i}.text`,
-    };
-  });
+  const paragraphs: Para[] = bullets.map((b, i) => ({
+    runs: spansToRuns(b.runs),
+    bullet: true,
+    indentLevel: b.level ?? 0,
+    spaceAfterPt: 6,
+    align: "left",
+    source: `${prefix}.${i}.runs`,
+  }));
   return {
     kind: "text",
     ...box,
@@ -123,8 +118,8 @@ export function bulletsElement(
   };
 }
 
-// Full-width pale-blue note band with centered text (optional bottom band).
-export function noteBand(t: Theme, text: string): Element[] {
+// Full-width pale-blue note band with centered text.
+export function noteBand(t: Theme, note: Span[]): Element[] {
   const x = t.margin.x;
   const w = CANVAS.w - t.margin.x * 2;
   const h = 0.8;
@@ -137,7 +132,7 @@ export function noteBand(t: Theme, text: string): Element[] {
       y,
       w: w - 0.6,
       h,
-      paragraphs: [{ runs: [{ text, color: t.colors.brand }], source: "note" }],
+      paragraphs: [{ runs: spansToRuns(note), source: "note" }],
       font: t.fonts.body,
       size: t.type.body,
       color: t.colors.brand,

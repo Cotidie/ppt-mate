@@ -4,7 +4,6 @@ import { CANVAS, header, footer, bulletsElement, noteBand } from "../shared";
 
 type Body = Extract<import("../../model/deck").Slide, { layout: "body" }>;
 
-// Header (kicker+title) + bullet list in the content zone + optional bottom note band.
 export function resolveBody(s: Body, t: Theme, footerText: string): Element[] {
   const { elements, contentTop } = header(t, s.title, s.kicker);
   const els: Element[] = [...elements];

@@ -65,7 +65,7 @@ export type ImageEl = {
   path: string;
 };
 
-export type TableCell = { text: string; color?: string; source?: string };
+export type TableCellEl = { runs: Run[]; source?: string };
 
 export type TableEl = {
   kind: "table";
@@ -73,9 +73,8 @@ export type TableEl = {
   y: number;
   w: number;
   h: number;
-  columns: string[];
-  columnSources?: string[]; // editable-field path per column header, index-aligned
-  rows: TableCell[][];
+  columns: TableCellEl[];
+  rows: TableCellEl[][];
   headerFill: string;
   headerColor: string;
   highlightRow?: number;

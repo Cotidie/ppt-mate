@@ -1,10 +1,9 @@
 import type { Theme } from "../../theme/theme";
 import type { Element, Para } from "../element";
-import { CANVAS, header, footer, noteBand, emphasis } from "../shared";
+import { CANVAS, header, footer, noteBand, spansToRuns } from "../shared";
 
 type Comparison = Extract<import("../../model/deck").Slide, { layout: "comparison" }>;
 
-// 2-3 rounded cards side by side: navy filled header bar + bulleted light body.
 export function resolveComparison(s: Comparison, t: Theme, footerText: string): Element[] {
   const { elements, contentTop } = header(t, s.title, s.kicker);
   const els: Element[] = [...elements];
@@ -25,9 +24,7 @@ export function resolveComparison(s: Comparison, t: Theme, footerText: string): 
   s.cards.forEach((card, i) => {
     const cx = x + i * (cardW + gap);
 
-    // card body panel
     els.push({ kind: "rect", x: cx, y: top, w: cardW, h: cardH, fill: t.colors.cardBody, radius: r });
-    // navy header bar
     els.push({ kind: "rect", x: cx, y: top, w: cardW, h: headerH, fill: t.colors.cardHeader, radius: r });
     els.push({
       kind: "text",
@@ -35,7 +32,7 @@ export function resolveComparison(s: Comparison, t: Theme, footerText: string): 
       y: top,
       w: cardW - 0.5,
       h: headerH,
-      paragraphs: [{ runs: [{ text: card.header, bold: true, color: t.colors.white }], source: `cards.${i}.header` }],
+      paragraphs: [{ runs: spansToRuns(card.header), bold: true, source: `cards.${i}.header` }],
       font: t.fonts.title,
       size: t.type.body + 2,
       color: t.colors.white,
@@ -43,18 +40,14 @@ export function resolveComparison(s: Comparison, t: Theme, footerText: string): 
       valign: "middle",
     });
 
-    // bulleted body
-    const paragraphs: Para[] = card.bullets.map((b, j) => {
-      const em = emphasis(b.emphasis, t);
-      return {
-        runs: [{ text: b.text, bold: em.bold, color: em.color }],
-        bullet: true,
-        indentLevel: b.level ?? 0,
-        spaceAfterPt: 6,
-        align: "left",
-        source: `cards.${i}.bullets.${j}.text`,
-      };
-    });
+    const paragraphs: Para[] = card.bullets.map((b, j) => ({
+      runs: spansToRuns(b.runs),
+      bullet: true,
+      indentLevel: b.level ?? 0,
+      spaceAfterPt: 6,
+      align: "left",
+      source: `cards.${i}.bullets.${j}.runs`,
+    }));
     els.push({
       kind: "text",
       x: cx + 0.3,

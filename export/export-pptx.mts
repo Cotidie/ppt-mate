@@ -74,15 +74,30 @@ function addRectEl(
   });
 }
 
+function runsToTextProps(
+  runs: { text: string; bold?: boolean; italic?: boolean; underline?: boolean; color?: string; highlight?: string }[],
+  fallback: { color?: string; bold?: boolean; italic?: boolean }
+): pptxgen.TextProps[] {
+  return runs.map((r) => ({
+    text: r.text,
+    options: {
+      bold: r.bold ?? fallback.bold,
+      italic: r.italic ?? fallback.italic,
+      underline: r.underline ? { style: "sng" } : undefined,
+      highlight: r.highlight ? hex(r.highlight) : undefined,
+      color: hex(r.color ?? fallback.color),
+    },
+  }));
+}
+
 function addTableEl(slide: pptxgen.Slide, e: Extract<Element, { kind: "table" }>) {
   const border = { type: "solid" as const, color: hex(e.borderColor), pt: 1 };
 
   const headerRow: pptxgen.TableRow = e.columns.map((c, ci) => ({
-    text: c,
+    text: runsToTextProps(c.runs, { color: e.headerColor, bold: true }),
     options: {
       fill: { color: hex(e.headerFill) },
       color: hex(e.headerColor),
-      bold: true,
       align: ci === 0 ? "left" : "center",
       valign: "middle",
     },
@@ -90,11 +105,12 @@ function addTableEl(slide: pptxgen.Slide, e: Extract<Element, { kind: "table" }>
 
   const dataRows: pptxgen.TableRow[] = e.rows.map((row, ri) =>
     row.map((cell, ci) => ({
-      text: cell.text,
-      options: {
-        color: hex(cell.color ?? e.textColor),
-        bold: Boolean(cell.color) || ci === 0,
+      text: runsToTextProps(cell.runs, {
+        color: e.textColor,
+        bold: ci === 0,
         italic: ri === e.highlightRow,
+      }),
+      options: {
         fill: ri === e.highlightRow && e.highlightFill ? { color: hex(e.highlightFill) } : undefined,
         align: ci === 0 ? "left" : "center",
         valign: "middle",

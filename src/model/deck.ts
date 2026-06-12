@@ -15,65 +15,57 @@ export type Span = {
 
 export type RichText = Span[];
 
-export type Emphasis = "green" | "red" | "bold";
-
 export type Bullet = {
-  text: string;
+  runs: Span[];
   level?: 0 | 1; // 0 = top-level, 1 = sub-bullet
-  emphasis?: Emphasis;
 };
 
 export type Card = {
-  header: string;
+  header: RichText;
   bullets: Bullet[];
 };
 
-export type CellColor = "green" | "red" | undefined;
-
 export type TableRow = {
-  cells: string[];
-  // optional per-cell semantic color, index-aligned to cells
-  cellColors?: CellColor[];
+  cells: RichText[];
 };
 
-// navLabel: sidebar-only display name. Never rendered on the slide itself;
-// purely an authoring aid. Falls back to `title` when absent.
+// navLabel: sidebar-only display name. Never rendered on the slide itself.
 export type Slide =
   | {
       id: string;
       layout: "cover";
       navLabel?: string;
-      kicker?: string;
-      title: string;
-      citation?: string;
-      authors?: string[];
+      kicker?: RichText;
+      title: RichText;
+      citation?: RichText;
+      authors?: RichText[];
     }
   | {
       id: string;
       layout: "body";
       navLabel?: string;
-      kicker?: string;
-      title: string;
+      kicker?: RichText;
+      title: RichText;
       bullets: Bullet[];
-      note?: string;
+      note?: RichText;
     }
   | {
       id: string;
       layout: "comparison";
       navLabel?: string;
-      kicker?: string;
-      title: string;
+      kicker?: RichText;
+      title: RichText;
       cards: Card[]; // 2-3
-      note?: string;
+      note?: RichText;
     }
   | {
       id: string;
       layout: "table";
       navLabel?: string;
-      kicker?: string;
-      title: string;
-      verdict?: string;
-      columns: string[];
+      kicker?: RichText;
+      title: RichText;
+      verdict?: RichText;
+      columns: RichText[];
       rows: TableRow[];
       highlightRow?: number; // 0-based index into rows
     }
@@ -81,8 +73,8 @@ export type Slide =
       id: string;
       layout: "closing";
       navLabel?: string;
-      title: string;
-      subtitle?: string;
+      title: RichText;
+      subtitle?: RichText;
     };
 
 export type Deck = {
