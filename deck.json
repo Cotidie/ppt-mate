@@ -1,0 +1,173 @@
+{
+  "meta": {
+    "title": "SelfCheckGPT Replication - Progress",
+    "footer": "© 2026  Korea Advanced Institute of Science and Technology. KAIST. All rights reserved."
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "layout": "cover",
+      "kicker": "AI Ethics - Team 15",
+      "title": "(Progress) SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models",
+      "citation": "Manakul, P., Liusie, A., & Gales, M. J. F. (2023). SelfCheckGPT: Zero-resource black-box hallucination detection for generative large language models. arXiv.",
+      "authors": [
+        "Youngmin Im (20253647)",
+        "Wonseok Jang (20254531)",
+        "Soyeon Park (20230280)",
+        "Mariana Cuevas (20254746)"
+      ]
+    },
+    {
+      "id": "task-division",
+      "layout": "comparison",
+      "kicker": "Replication Approach",
+      "title": "Task division: Team 1 & Team 2",
+      "cards": [
+        {
+          "header": "Grey LLM Team - Passages 1-119",
+          "bullets": [
+            {
+              "text": "Reuse original main passage"
+            },
+            {
+              "text": "Resample with GPT-3.5 Turbo, N=10"
+            },
+            {
+              "text": "Observe Log Probs",
+              "level": 1
+            },
+            {
+              "text": "Run NLI + BERTScore"
+            },
+            {
+              "text": "NLI: DeBERTa-v2",
+              "level": 1
+            },
+            {
+              "text": "BERT: RoBERTa",
+              "level": 1
+            }
+          ]
+        },
+        {
+          "header": "Local LLM Team - Passages 1-238",
+          "bullets": [
+            {
+              "text": "Run Prompt variant"
+            },
+            {
+              "text": "1908 sentences x 20 samples = 38160 API calls",
+              "level": 1
+            },
+            {
+              "text": "Test multiple local LLMs"
+            },
+            {
+              "text": "Qwen3.5 9B",
+              "level": 1
+            },
+            {
+              "text": "Qwen3.5 9B Q8",
+              "level": 1
+            },
+            {
+              "text": "Gemma4 8B Q4",
+              "level": 1
+            }
+          ]
+        }
+      ],
+      "note": "Both teams share the original human annotations as ground truth for evaluation."
+    },
+    {
+      "id": "issue-budget",
+      "layout": "body",
+      "kicker": "Replication Issues",
+      "title": "Issue: API & Compute budget",
+      "bullets": [
+        {
+          "text": "BERT / NLI scoring on Colab CPU => slow & unstable",
+          "emphasis": "red"
+        },
+        {
+          "text": "Generating N = 20 samples x 238 passages => expensive",
+          "emphasis": "red"
+        },
+        {
+          "text": "What we did: reduced N from 20 to 10",
+          "emphasis": "green"
+        },
+        {
+          "text": "Sample-size curve plateaus early, so fewer samples keep the signal",
+          "level": 1
+        }
+      ],
+      "note": "Reduce sample size to balance cost and feasibility."
+    },
+    {
+      "id": "small-models",
+      "layout": "table",
+      "kicker": "Replication Result",
+      "title": "Better Results on Recent Small Models",
+      "verdict": "Local sub-9B judges match the paper",
+      "columns": [
+        "Judge LLM",
+        "NonFact",
+        "NonFact*",
+        "Factual",
+        "Pearson",
+        "Spearman"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "Qwen3.5-9B Q8",
+            "93.24",
+            "65.80",
+            "74.66",
+            "75.26",
+            "76.02"
+          ]
+        },
+        {
+          "cells": [
+            "Qwen3.5-9B",
+            "92.56",
+            "65.13",
+            "72.57",
+            "71.51",
+            "72.81"
+          ]
+        },
+        {
+          "cells": [
+            "Gemma-31B",
+            "93.15",
+            "64.51",
+            "72.40",
+            "74.06",
+            "74.60"
+          ]
+        },
+        {
+          "cells": [
+            "Paper (ChatGPT)",
+            "93.42",
+            "53.19",
+            "67.09",
+            "78.32",
+            "78.30"
+          ]
+        }
+      ],
+      "highlightRow": 3
+    },
+    {
+      "id": "closing",
+      "layout": "closing",
+      "title": "Thank You!",
+      "subtitle": "For listening and paying attention",
+      "navLabel": "last"
+    }
+  ]
+}

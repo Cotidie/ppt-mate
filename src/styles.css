@@ -1,0 +1,516 @@
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: #2a2f3a;
+  color: #e7eaf0;
+}
+
+/* Inline-editable slide text. Subtle outline on hover hints it's editable;
+   double-click turns on the contentEditable state (.editing). */
+.slide-editable {
+  border-radius: 3px;
+  outline: 1px dashed transparent;
+  outline-offset: 2px;
+  cursor: text;
+  transition: outline-color 0.12s, background 0.12s;
+}
+
+.slide-editable:hover {
+  outline-color: rgba(59, 111, 212, 0.6);
+}
+
+.slide-editable.editing {
+  outline: 2px solid #3b6fd4;
+  background: rgba(59, 111, 212, 0.08);
+}
+
+.app {
+  display: grid;
+  /* minmax(0, 1fr): without the 0-min, the track's min-content is the 1280px
+     stage and the column blows out past the viewport (horizontal scrollbar).
+     --rail-w drives the rail track; the drag handle writes it live. */
+  grid-template-columns: var(--rail-w, 200px) 5px minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden; /* resizer grips bulge past their tracks; don't spawn scrollbars */
+}
+
+/* Draggable divider between rail and stage. position relative anchors the grip;
+   overflow visible lets the grip bulge past the 5px track. */
+.rail-resizer {
+  position: relative;
+  overflow: visible;
+  cursor: col-resize;
+  background: #353b48;
+  transition: background 0.12s;
+}
+
+.rail-resizer:hover,
+.rail-resizer.dragging {
+  background: #3b6fd4;
+}
+
+.rail {
+  overflow-x: hidden; /* width can snap to 0 (hidden); clip content rather than spill */
+  overflow-y: auto;
+  background: #1e222b;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thumb-row {
+  position: relative;
+}
+
+.thumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 30px 8px 10px; /* right pad leaves room for the × */
+  border: 1px solid #353b48;
+  border-radius: 8px;
+  background: #262b35;
+  color: #c6ccd8;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.thumb.active {
+  border-color: #3b6fd4;
+  background: #2d3950;
+  color: #fff;
+}
+
+/* Rename mode reuses the .thumb shell but swaps in a text input. */
+.thumb-editing {
+  padding-right: 10px; /* no × button in edit mode, reclaim the space */
+  border-color: #3b6fd4;
+  cursor: text;
+}
+
+.thumb-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  padding: 0;
+}
+
+.thumb-del {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+
+/* The × is drawn as two geometric bars instead of a font glyph, so it stays
+   perfectly centered regardless of which fallback font the browser uses. */
+.thumb-del::before,
+.thumb-del::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 9px;
+  height: 1.5px;
+  background: #8b93a3;
+  border-radius: 1px;
+}
+
+.thumb-del::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.thumb-del::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.thumb-del:hover::before,
+.thumb-del:hover::after {
+  background: #fff;
+}
+
+.thumb-row:hover .thumb-del,
+.thumb-del:focus-visible {
+  opacity: 1;
+}
+
+.thumb-del:hover {
+  background: #c0392b;
+  color: #fff;
+}
+
+.thumb-n {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #3b6fd4;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+
+.thumb-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Holds the slide + hud; takes the space the chat dock leaves. Inherits the
+   centering the old .main had. */
+.stage-region {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stage-wrap {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.stage-sizer {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.stage {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+}
+
+.hud {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(20, 23, 30, 0.85);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.hud button {
+  background: #3b6fd4;
+  color: #fff;
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.hud button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Bottom-docked chat with the local Claude Code CLI. Height is drag-set inline
+   (see ChatDock); the log flexes to fill whatever remains. */
+.chat-dock {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #1e222b;
+  border-top: 1px solid #353b48;
+}
+
+/* Hidden: dragged shut. Only a thin bar remains so the grab grip stays on
+   screen and the dock can be pulled back open. */
+.chat-dock.hidden {
+  height: 18px;
+}
+
+/* Drag handle along the dock's top edge. A fat invisible hit zone (12px,
+   straddling the edge) stays easy to grab at any zoom; the visible line is the
+   thin ::after centered inside it. */
+.chat-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 12px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+  z-index: 3;
+}
+
+.chat-resizer::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  transform: translateY(-50%);
+  background: #353b48;
+  transition: background 0.12s;
+}
+
+.chat-resizer:hover::after,
+.chat-resizer.dragging::after {
+  background: #3b6fd4;
+}
+
+/* Always-visible grab grip centered on a resizer bar. Child of the resizer, so
+   pointer events bubble up to start the drag; dragging a panel fully shut leaves
+   only this grip on screen to pull it back open. */
+.resizer-grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  background: #3b6fd4;
+  border: 1px solid #5b86dd;
+  border-radius: 6px;
+}
+
+.resizer-grip-v {
+  width: 12px;
+  height: 46px;
+  cursor: col-resize;
+}
+
+.resizer-grip-h {
+  width: 46px;
+  height: 12px;
+  cursor: row-resize;
+}
+
+.rail-resizer:hover .resizer-grip,
+.chat-resizer:hover .resizer-grip {
+  background: #4d7ee0;
+}
+
+/* Two short bars inside the grip as a grab affordance. */
+.resizer-grip::before,
+.resizer-grip::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 1px;
+}
+
+.resizer-grip-v::before,
+.resizer-grip-v::after {
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  transform: translateY(-50%);
+}
+
+.resizer-grip-v::before {
+  left: 3px;
+}
+
+.resizer-grip-v::after {
+  right: 3px;
+}
+
+.resizer-grip-h::before,
+.resizer-grip-h::after {
+  left: 50%;
+  height: 2px;
+  width: 18px;
+  transform: translateX(-50%);
+}
+
+.resizer-grip-h::before {
+  top: 3px;
+}
+
+.resizer-grip-h::after {
+  bottom: 3px;
+}
+
+.chat-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-msg {
+  max-width: 80%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-user {
+  align-self: flex-end;
+  background: #2d3950;
+  color: #fff;
+}
+
+.chat-assistant {
+  align-self: flex-start;
+  background: #262b35;
+  color: #c6ccd8;
+}
+
+.chat-error {
+  align-self: stretch;
+  background: #3a2326;
+  color: #e8a3a3;
+  border: 1px solid #5a2d33;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid #2a2f3a;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  max-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid #353b48;
+  border-radius: 8px;
+  background: #262b35;
+  color: #e7eaf0;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.chat-input:focus {
+  border-color: #3b6fd4;
+}
+
+/* Split button: Send + a caret that opens the actions menu. */
+.chat-send-group {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  position: relative;
+  display: flex;
+}
+
+.chat-send,
+.chat-send-caret {
+  border: none;
+  background: #3b6fd4;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chat-send {
+  padding: 8px 16px;
+  border-radius: 8px 0 0 8px;
+}
+
+.chat-send-caret {
+  padding: 8px 8px;
+  border-radius: 0 8px 8px 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.chat-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+}
+
+.chat-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  min-width: 100%;
+  padding: 4px;
+  border: 1px solid #353b48;
+  border-radius: 8px;
+  background: #262b35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.chat-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #c6ccd8;
+  font-size: 13px;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-menu button:hover:not(:disabled) {
+  background: #2d3950;
+  color: #fff;
+}
+
+.chat-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

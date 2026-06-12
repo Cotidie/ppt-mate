@@ -1,0 +1,24 @@
+{
+  "canvas": { "w": 13.333, "h": 7.5 },
+  "colors": {
+    "bg": "#F7F9FC",
+    "textPrimary": "#1F2A44",
+    "textSecondary": "#5B6677",
+    "kicker": "#9AA3AF",
+    "brand": "#2B4FA0",
+    "brandBright": "#3B6FD4",
+    "green": "#1F9D55",
+    "red": "#D64545",
+    "amber": "#F2A93B",
+    "amberFill": "#FFE08A",
+    "cardHeader": "#2C3E5C",
+    "cardBody": "#EEF2F8",
+    "panel": "#EAF0FB",
+    "border": "#D9DEE6",
+    "white": "#FFFFFF"
+  },
+  "fonts": { "title": "Poppins", "body": "Inter" },
+  "type": { "kicker": 15, "title": 34, "coverTitle": 30, "closingTitle": 48, "body": 17, "caption": 10.5 },
+  "margin": { "x": 0.9, "top": 0.7, "bottom": 0.5 },
+  "layout": { "cardGap": 0.3, "cardRadius": 0.12, "cardHeaderH": 0.6, "footerH": 0.4, "lineHeightPt": 26 }
+}
