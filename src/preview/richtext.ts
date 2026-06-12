@@ -1,6 +1,6 @@
 // Serializes between deck Span[] and a single-paragraph ProseMirror document.
 // The TipTap editor edits one field, which is exactly one paragraph of inline
-// runs — no block structure. Marks map 1:1 to Span fields.
+// runs, no block structure. Marks map 1:1 to Span fields.
 
 import type { Span } from "../model/deck";
 
