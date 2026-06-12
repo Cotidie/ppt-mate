@@ -188,9 +188,9 @@ function isResultLine(line: string): boolean {
   }
 }
 
-// Inline slide text edit: sets one field (by dotted path) on the slide and
-// rewrites deck.json. Path examples: "title", "bullets.2.text",
-// "cards.0.bullets.1.text", "rows.0.cells.2".
+// Inline slide text edit: sets one rich-text field (by dotted path) on the
+// slide and rewrites deck.json. The value is a Span[] array. Path examples:
+// "title", "bullets.2.runs", "cards.0.bullets.1.runs", "rows.0.cells.2".
 async function handleEditSlide(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
@@ -202,7 +202,7 @@ async function handleEditSlide(req: IncomingMessage, res: ServerResponse, next: 
   }
 }
 
-async function editSlideField(id: string, path: string, value: string): Promise<void> {
+async function editSlideField(id: string, path: string, value: unknown): Promise<void> {
   const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
   const slide = deck.slides.find((s: { id: string }) => s.id === id);
   if (!slide) return;
@@ -236,7 +236,11 @@ async function renameSlideById(id: string, label: string): Promise<void> {
   const slide = deck.slides.find((s: { id: string }) => s.id === id);
   if (!slide) return;
   const trimmed = (label ?? "").trim();
-  if (!trimmed || trimmed === slide.title) delete slide.navLabel;
+  // slide.title is rich text (Span[]); compare against its flattened plain text.
+  const titleText = Array.isArray(slide.title)
+    ? slide.title.map((s: { text: string }) => s.text).join("")
+    : "";
+  if (!trimmed || trimmed === titleText) delete slide.navLabel;
   else slide.navLabel = trimmed;
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
 }
