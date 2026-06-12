@@ -4,6 +4,7 @@
 import type { CSSProperties } from "react";
 import type { Element, Para, VAlign } from "../layout/element";
 import { PX_PER_IN } from "../theme/theme";
+import { RichTextEditor } from "./RichTextEditor";
 
 const PT_PX = 96 / 72;
 const inPx = (v: number) => v * PX_PER_IN;
@@ -68,11 +69,17 @@ function Paragraph({
     return (
       <p style={style} data-source={p.source}>
         {bullet}
-        {p.runs.map((r, i) => (
-          <span key={i} style={runStyle(r)}>
-            {r.text}
-          </span>
-        ))}
+        <RichTextEditor
+          slideId={slideId}
+          path={p.source}
+          spans={p.runs as unknown as import("../model/deck").Span[]}
+        >
+          {p.runs.map((r, i) => (
+            <span key={i} style={runStyle(r)}>
+              {r.text}
+            </span>
+          ))}
+        </RichTextEditor>
       </p>
     );
   }
@@ -136,11 +143,21 @@ export function ElementView({ e, slideId }: { e: Element; slideId: string }) {
                   border: `1px solid ${e.borderColor}`,
                 }}
               >
-                {c.runs.map((r, ri) => (
-                  <span key={ri} style={runStyle(r)}>
-                    {r.text}
-                  </span>
-                ))}
+                {c.source ? (
+                  <RichTextEditor
+                    slideId={slideId}
+                    path={c.source}
+                    spans={c.runs as unknown as import("../model/deck").Span[]}
+                  >
+                    {c.runs.map((r, ri) => (
+                      <span key={ri} style={runStyle(r)}>{r.text}</span>
+                    ))}
+                  </RichTextEditor>
+                ) : (
+                  c.runs.map((r, ri) => (
+                    <span key={ri} style={runStyle(r)}>{r.text}</span>
+                  ))
+                )}
               </th>
             ))}
           </tr>
@@ -161,11 +178,21 @@ export function ElementView({ e, slideId }: { e: Element; slideId: string }) {
                     border: `1px solid ${e.borderColor}`,
                   }}
                 >
-                  {cell.runs.map((r, rri) => (
-                    <span key={rri} style={runStyle(r)}>
-                      {r.text}
-                    </span>
-                  ))}
+                  {cell.source ? (
+                    <RichTextEditor
+                      slideId={slideId}
+                      path={cell.source}
+                      spans={cell.runs as unknown as import("../model/deck").Span[]}
+                    >
+                      {cell.runs.map((r, rri) => (
+                        <span key={rri} style={runStyle(r)}>{r.text}</span>
+                      ))}
+                    </RichTextEditor>
+                  ) : (
+                    cell.runs.map((r, rri) => (
+                      <span key={rri} style={runStyle(r)}>{r.text}</span>
+                    ))
+                  )}
                 </td>
               ))}
             </tr>
