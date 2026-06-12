@@ -5,7 +5,14 @@
 export type Align = "left" | "center" | "right";
 export type VAlign = "top" | "middle" | "bottom";
 
-export type Run = { text: string; bold?: boolean; italic?: boolean; color?: string };
+export type Run = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  color?: string;
+  highlight?: string;
+};
 
 export type Para = {
   runs: Run[];

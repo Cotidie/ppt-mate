@@ -27,6 +27,8 @@ function addTextEl(slide: pptxgen.Slide, e: Extract<Element, { kind: "text" }>) 
         options: {
           bold: r.bold ?? p.bold ?? false,
           italic: r.italic,
+          underline: r.underline ? { style: "sng" } : undefined,
+          highlight: r.highlight ? hex(r.highlight) : undefined,
           color: hex(r.color ?? p.color ?? e.color),
           fontFace: p.font ?? e.font,
           fontSize: p.size ?? e.size,

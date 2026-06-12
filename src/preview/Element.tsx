@@ -131,6 +131,16 @@ function box(e: { x: number; y: number; w: number; h: number }): CSSProperties {
   };
 }
 
+function runStyle(r: { bold?: boolean; italic?: boolean; underline?: boolean; color?: string; highlight?: string }): CSSProperties {
+  return {
+    fontWeight: r.bold ? 700 : undefined,
+    fontStyle: r.italic ? "italic" : undefined,
+    textDecoration: r.underline ? "underline" : undefined,
+    color: r.color,
+    background: r.highlight,
+  };
+}
+
 function Paragraph({
   p,
   slideId,
@@ -183,14 +193,7 @@ function Paragraph({
   }
 
   const runs = p.runs.map((r, i) => (
-    <span
-      key={i}
-      style={{
-        fontWeight: r.bold ? 700 : undefined,
-        fontStyle: r.italic ? "italic" : undefined,
-        color: r.color,
-      }}
-    >
+    <span key={i} style={runStyle(r)}>
       {r.text}
     </span>
   ));
