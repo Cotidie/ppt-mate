@@ -1,6 +1,20 @@
 // Deck content model = single source of truth. Both the React preview and the PPTX
 // exporter read this. Conversational edits mutate this data (deck.json), never the DOM.
 
+// A styled run of text as STORED in deck.json. Mirrors the resolved layout Run.
+// Marks are user overrides; element-level defaults (title bold, kicker gray) are
+// applied by resolvers, not baked into spans.
+export type Span = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  color?: string;     // hex
+  highlight?: string; // hex
+};
+
+export type RichText = Span[];
+
 export type Emphasis = "green" | "red" | "bold";
 
 export type Bullet = {
