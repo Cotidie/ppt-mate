@@ -3,7 +3,7 @@
 // floating BubbleMenu (B/I/U/color/highlight). Enter or blur commits the
 // serialized Span[] to deck.json via /api/slides/edit; Escape discards.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import Document from "@tiptap/extension-document";
@@ -69,6 +69,12 @@ function EditorInstance({
   spans: Span[];
   onClose: () => void;
 }) {
+  // Guards the field against more than one finalize. Enter, blur, and a
+  // post-close blur can all race; whichever lands first wins, the rest no-op.
+  // It also makes Escape a true discard: a trailing blur after Escape sees the
+  // field already finalized and never commits.
+  const finalized = useRef(false);
+
   const editor = useEditor({
     extensions: [
       OneLineDocument,
@@ -94,7 +100,7 @@ function EditorInstance({
         }
         if (event.key === "Escape") {
           event.preventDefault();
-          onClose();
+          discard();
           return true;
         }
         return false;
@@ -103,10 +109,17 @@ function EditorInstance({
   });
 
   function doCommit() {
-    if (!editor) return;
+    if (finalized.current || !editor || editor.isDestroyed) return;
+    finalized.current = true;
     const next = docToSpans(editor.getJSON() as unknown as PMDoc);
     onClose();
     void commitSpans(slideId, path, next);
+  }
+
+  function discard() {
+    if (finalized.current) return;
+    finalized.current = true;
+    onClose();
   }
 
   // Keep arrow keys from flipping slides while the editor is focused.
@@ -125,6 +138,7 @@ function EditorInstance({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => editor.chain().focus().toggleBold().run()}
           className={editor.isActive("bold") ? "on" : ""}
+          title="Bold"
         >
           <b>B</b>
         </button>
@@ -132,6 +146,7 @@ function EditorInstance({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => editor.chain().focus().toggleItalic().run()}
           className={editor.isActive("italic") ? "on" : ""}
+          title="Italic"
         >
           <i>I</i>
         </button>
@@ -139,6 +154,7 @@ function EditorInstance({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => editor.chain().focus().toggleUnderline().run()}
           className={editor.isActive("underline") ? "on" : ""}
+          title="Underline"
         >
           <u>U</u>
         </button>

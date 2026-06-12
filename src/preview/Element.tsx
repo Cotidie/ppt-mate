@@ -2,7 +2,8 @@
 // points -> px at 96/72. This is the ONLY place geometry becomes pixels in the preview.
 
 import type { CSSProperties } from "react";
-import type { Element, Para, VAlign } from "../layout/element";
+import type { Element, Para, Run, VAlign } from "../layout/element";
+import type { Span } from "../model/deck";
 import { PX_PER_IN } from "../theme/theme";
 import { RichTextEditor } from "./RichTextEditor";
 
@@ -33,6 +34,29 @@ function runStyle(r: { bold?: boolean; italic?: boolean; underline?: boolean; co
     color: r.color,
     background: r.highlight,
   };
+}
+
+// Resolved Run and stored Span are structurally identical (text + the five
+// optional marks). This is the single point that bridges the two names so the
+// editor (which speaks Span) can take resolved runs.
+const asSpans = (runs: Run[]): Span[] => runs;
+
+function renderRuns(runs: Run[]) {
+  return runs.map((r, i) => (
+    <span key={i} style={runStyle(r)}>
+      {r.text}
+    </span>
+  ));
+}
+
+// One table cell's content: editable when it carries a source, else plain runs.
+function CellContent({ slideId, source, runs }: { slideId: string; source?: string; runs: Run[] }) {
+  if (!source) return <>{renderRuns(runs)}</>;
+  return (
+    <RichTextEditor slideId={slideId} path={source} spans={asSpans(runs)}>
+      {renderRuns(runs)}
+    </RichTextEditor>
+  );
 }
 
 function Paragraph({
@@ -69,30 +93,17 @@ function Paragraph({
     return (
       <p style={style} data-source={p.source}>
         {bullet}
-        <RichTextEditor
-          slideId={slideId}
-          path={p.source}
-          spans={p.runs as unknown as import("../model/deck").Span[]}
-        >
-          {p.runs.map((r, i) => (
-            <span key={i} style={runStyle(r)}>
-              {r.text}
-            </span>
-          ))}
+        <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)}>
+          {renderRuns(p.runs)}
         </RichTextEditor>
       </p>
     );
   }
 
-  const runs = p.runs.map((r, i) => (
-    <span key={i} style={runStyle(r)}>
-      {r.text}
-    </span>
-  ));
   return (
     <p style={style}>
       {bullet}
-      {runs}
+      {renderRuns(p.runs)}
     </p>
   );
 }
@@ -143,21 +154,7 @@ export function ElementView({ e, slideId }: { e: Element; slideId: string }) {
                   border: `1px solid ${e.borderColor}`,
                 }}
               >
-                {c.source ? (
-                  <RichTextEditor
-                    slideId={slideId}
-                    path={c.source}
-                    spans={c.runs as unknown as import("../model/deck").Span[]}
-                  >
-                    {c.runs.map((r, ri) => (
-                      <span key={ri} style={runStyle(r)}>{r.text}</span>
-                    ))}
-                  </RichTextEditor>
-                ) : (
-                  c.runs.map((r, ri) => (
-                    <span key={ri} style={runStyle(r)}>{r.text}</span>
-                  ))
-                )}
+                <CellContent slideId={slideId} source={c.source} runs={c.runs} />
               </th>
             ))}
           </tr>
@@ -178,21 +175,7 @@ export function ElementView({ e, slideId }: { e: Element; slideId: string }) {
                     border: `1px solid ${e.borderColor}`,
                   }}
                 >
-                  {cell.source ? (
-                    <RichTextEditor
-                      slideId={slideId}
-                      path={cell.source}
-                      spans={cell.runs as unknown as import("../model/deck").Span[]}
-                    >
-                      {cell.runs.map((r, rri) => (
-                        <span key={rri} style={runStyle(r)}>{r.text}</span>
-                      ))}
-                    </RichTextEditor>
-                  ) : (
-                    cell.runs.map((r, rri) => (
-                      <span key={rri} style={runStyle(r)}>{r.text}</span>
-                    ))
-                  )}
+                  <CellContent slideId={slideId} source={cell.source} runs={cell.runs} />
                 </td>
               ))}
             </tr>
