@@ -41,9 +41,11 @@ const AGENT_BRIEF = ((): string => {
 // tools that read it on demand. Fields are additive (future: selectedText,
 // region, pointer) so awareness can grow without re-architecture.
 type RenderFact = { overflowLines?: number; overflowInches?: number; offCanvas?: boolean };
+type TextSel = { elementKey: string; path?: string; text: string; start?: number; end?: number };
 type UiContext = {
   activeSlideId?: string;
   selection?: string[];
+  selectedText?: TextSel | null;
   render?: Record<string, RenderFact>;
 };
 let uiContext: UiContext = {};
@@ -170,6 +172,11 @@ async function contextHeader(): Promise<string> {
     `active slide: ${id}${layout ? ` (${layout})` : ""}${title ? ` "${title}"` : ""}`,
     `selection: ${sel}`,
   ];
+  const st = uiContext.selectedText;
+  if (st?.text) {
+    const snippet = st.text.length > 80 ? st.text.slice(0, 80) + "…" : st.text;
+    parts.push(`text: "${snippet}" in ${st.elementKey}${st.path ? ` (${st.path})` : ""}`);
+  }
   const issues = renderIssues();
   if (issues) parts.push(issues);
   return `[context] ${parts.join("; ")}`;
@@ -335,7 +342,7 @@ const deckMcp = createSdkMcpServer({
     ),
     tool(
       "get_selection",
-      "The element(s) the user has selected on the active slide, each with its resolved geometry and any render issue. Empty when nothing is selected.",
+      "What the user has selected for context with the Selection tool: the element(s) (each with resolved geometry + any render issue) and, when present, the exact selected text range (substring, the element + deck field it is in, and char offsets). Empty when nothing is selected.",
       {},
       async () => {
         const keys = uiContext.selection ?? [];
@@ -347,7 +354,12 @@ const deckMcp = createSdkMcpServer({
           element: (elements as { key?: string }[]).find((e) => e.key === key) ?? null,
           render: uiContext.render?.[key] ?? null,
         }));
-        return textResult({ activeSlideId: uiContext.activeSlideId, selection: keys, items });
+        return textResult({
+          activeSlideId: uiContext.activeSlideId,
+          selection: keys,
+          selectedText: uiContext.selectedText ?? null,
+          items,
+        });
       },
     ),
     tool(

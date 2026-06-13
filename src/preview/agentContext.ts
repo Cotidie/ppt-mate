@@ -13,9 +13,20 @@
 import { useSyncExternalStore } from "react";
 
 export type RenderFact = { overflowLines?: number; overflowInches?: number; offCanvas?: boolean };
+// A text sub-selection the user made for Claude: the exact substring, the element
+// it lives in, the deck field path (when known), and char offsets within that
+// element's plain text.
+export type TextSel = {
+  elementKey: string;
+  path?: string;
+  text: string;
+  start?: number;
+  end?: number;
+};
 export type UiContext = {
   activeSlideId?: string;
   selection?: string[];
+  selectedText?: TextSel | null;
   render?: Record<string, RenderFact>;
 };
 export type UiContextPatch = UiContext;

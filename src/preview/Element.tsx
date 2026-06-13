@@ -391,7 +391,17 @@ function listHostStyle(e: Extract<Element, { kind: "text" }>): CSSProperties {
 // Frame: per-element geometry owner (move/resize/hover) wrapping the content.
 // ---------------------------------------------------------------------------
 
-export function ElementView({ e, slideId, scale }: { e: Element; slideId: string; scale: number }) {
+export function ElementView({
+  e,
+  slideId,
+  scale,
+  ctxSelected,
+}: {
+  e: Element;
+  slideId: string;
+  scale: number;
+  ctxSelected?: boolean; // selected as Claude context (Select tool)
+}) {
   const { mode, optimistic, dragging, beginMove, startResize } = useElementGesture(
     slideId,
     e.key,
@@ -419,7 +429,8 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
   // move only). Keep them mounted while dragging even if the resizing edge slips
   // out from under the cursor and clears hover.
   const multi = sel.selected.size > 1;
-  const showHandles = (hover || dragging) && !multi && !groupDragging;
+  // No resize affordance in select mode (it picks context, never edits geometry).
+  const showHandles = (hover || dragging) && !multi && !groupDragging && mode !== "select";
   // The solid move-style selection outline: a selected group member, during any
   // drag (so an edit-mode resize gets clear feedback), and in move mode on hover.
   // Edit-mode hover/focus keep their own dashed/solid affordance (styles.css).
@@ -452,16 +463,20 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
     // sit ~5px outside the box. Non-text kinds clip their own content (see
     // ElementBody); text overflows so auto-grow + the floating BubbleMenu show.
     overflow: "visible",
-    cursor: mode === "move" ? (dragging ? "grabbing" : "grab") : "default",
+    cursor: mode === "move" ? (dragging ? "grabbing" : "grab") : mode === "select" ? "text" : "default",
     touchAction: "none",
-    // Move mode is gesture-only; never let a drag highlight text.
-    userSelect: mode === "move" ? "none" : undefined,
-    WebkitUserSelect: mode === "move" ? "none" : undefined,
+    // Move mode is gesture-only (no text highlight); select mode allows native
+    // text selection so the user can sweep letters/words for Claude context.
+    userSelect: mode === "move" ? "none" : mode === "select" ? "text" : undefined,
+    WebkitUserSelect: mode === "move" ? "none" : mode === "select" ? "text" : undefined,
   };
 
   return (
     <div
-      className={"el-frame " + mode + (isText ? " editable" : "") + (selected ? " selected" : "")}
+      className={
+        "el-frame " + mode + (isText ? " editable" : "") + (selected ? " selected" : "") +
+        (ctxSelected ? " ctx-selected" : "")
+      }
       data-key={e.key}
       style={frameStyle}
       onPointerDown={onBodyDown}

@@ -121,6 +121,18 @@ body {
   outline: 2px solid #3b6fd4;
 }
 
+/* Select tool: hovering an element hints it is pickable as Claude context; the
+   picked element gets a distinct solid ring + soft halo (vs the move outline). */
+.el-frame.select:hover:not(.ctx-selected) {
+  outline: 1px dashed rgba(59, 111, 212, 0.55);
+  border-radius: 3px;
+}
+.el-frame.ctx-selected {
+  outline: 2px solid #3b6fd4;
+  border-radius: 3px;
+  box-shadow: 0 0 0 4px rgba(59, 111, 212, 0.18);
+}
+
 /* During a move/resize drag, force one cursor across the whole document so it
    never reverts to the arrow over empty space or a slipped-away edge, and block
    text selection (edit mode leaves text selectable, so the resize drag would

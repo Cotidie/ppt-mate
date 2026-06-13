@@ -39,6 +39,11 @@ function formatContextLine(ctx: UiContext): string {
     `active slide: ${id}${layout ? ` (${layout})` : ""}${title ? ` "${title}"` : ""}`,
     `selection: ${sel}`,
   ];
+  const st = ctx.selectedText;
+  if (st?.text) {
+    const snippet = st.text.length > 80 ? st.text.slice(0, 80) + "…" : st.text;
+    parts.push(`text: "${snippet}" in ${st.elementKey}${st.path ? ` (${st.path})` : ""}`);
+  }
   const issues = issueMessages(ctx.render);
   if (issues.length) parts.push(`issues: ${issues.join(", ")}`);
   return `[context] ${parts.join("; ")}`;
@@ -55,6 +60,7 @@ export function AgentContextBar() {
   const layout = slide?.layout;
   const title = flatten(slide?.title);
   const selection = ctx.selection ?? [];
+  const selText = ctx.selectedText?.text ?? "";
   const issues = issueMessages(ctx.render);
   const line = formatContextLine(ctx);
 
@@ -91,6 +97,11 @@ export function AgentContextBar() {
               ? selection[0]
               : `${selection.length} selected`}
         </span>
+        {selText && (
+          <span className="ctx-chip" title={selText}>
+            “{selText.length > 24 ? selText.slice(0, 24) + "…" : selText}”
+          </span>
+        )}
         {issues.length > 0 && (
           <span className="ctx-chip warn" title={issues.join("; ")}>
             ⚠ layout issue{issues.length > 1 ? `s (${issues.length})` : ""}

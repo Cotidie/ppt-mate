@@ -72,10 +72,10 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [slides.length]);
 
-  // Tell the agent which slide is active (selection + render facts come from
-  // SlideCanvas). Selection is slide-scoped, so reset it as the slide changes.
+  // Tell the agent which slide is active. Selection / selected-text / render facts
+  // are owned and reported by SlideCanvas (it clears them on slide change).
   useEffect(() => {
-    reportContext({ activeSlideId: slides[i].id, selection: [] });
+    reportContext({ activeSlideId: slides[i].id });
   }, [i, slides]);
 
   return (

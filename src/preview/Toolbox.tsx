@@ -40,6 +40,9 @@ export function Toolbox({
       <ToolButton label="Edit mode" active={mode === "edit"} onClick={() => onMode("edit")}>
         <PencilIcon />
       </ToolButton>
+      <ToolButton label="Select for Claude" active={mode === "select"} onClick={() => onMode("select")}>
+        <CursorIcon />
+      </ToolButton>
 
       <div className="toolbox-divider" />
 
@@ -136,6 +139,14 @@ const PencilIcon = () =>
     <>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </>
+  );
+
+// Arrow cursor: the Selection tool (pick element / text for Claude context).
+const CursorIcon = () =>
+  svg(
+    <>
+      <path d="M4 3l7 17 2.5-7L20 10.5 4 3Z" />
     </>
   );
 

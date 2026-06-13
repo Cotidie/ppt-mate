@@ -8,7 +8,7 @@ import { theme, PX_PER_IN } from "../theme/theme";
 import { ElementView } from "./Element";
 import { SelectionContext, useSelectionState } from "./selection";
 import { useMode } from "./mode";
-import { reportContext, type RenderFact } from "./agentContext";
+import { reportContext, type RenderFact, type TextSel } from "./agentContext";
 
 const STAGE_W = theme.canvas.w * PX_PER_IN; // 1280
 const STAGE_H = theme.canvas.h * PX_PER_IN; // 720
@@ -46,10 +46,50 @@ export function SlideCanvas({
   const mode = useMode();
   const selection = useSelectionState(elements, slide.id, scale);
 
-  // Report the live selection to the agent (slide-scoped; App clears it on switch).
+  // The slide context picked for Claude with the Select tool: one element, or a
+  // text range. Persists across mode switches (only Select-mode actions change
+  // it); cleared when the active slide changes. Move-mode group selection is
+  // separate and is NOT reported to the agent.
+  const [claudeSel, setClaudeSel] = useState<{ keys: string[]; text: TextSel | null }>({
+    keys: [],
+    text: null,
+  });
+
   useEffect(() => {
-    reportContext({ selection: [...selection.selected] });
-  }, [selection.selected]);
+    reportContext({ selection: claudeSel.keys, selectedText: claudeSel.text });
+  }, [claudeSel]);
+
+  // A new slide is a fresh context.
+  useEffect(() => {
+    setClaudeSel({ keys: [], text: null });
+  }, [slide.id]);
+
+  // Select mode: capture what the user picks for Claude. A non-empty native text
+  // selection inside an element becomes a text range; a plain click selects the
+  // whole element; a click on empty stage clears. Listeners live only while the
+  // Select tool is active.
+  useEffect(() => {
+    if (mode !== "select") return;
+    const root = wrapRef.current;
+    if (!root) return;
+    const onSelChange = () => {
+      const t = readTextSel(root);
+      if (t) setClaudeSel({ keys: [t.elementKey], text: t });
+    };
+    const onClick = (ev: MouseEvent) => {
+      const native = window.getSelection();
+      if (native && !native.isCollapsed && native.toString().trim()) return; // text drag: handled above
+      const frame = (ev.target as HTMLElement | null)?.closest?.(".el-frame[data-key]") as HTMLElement | null;
+      if (frame && root.contains(frame)) setClaudeSel({ keys: [frame.getAttribute("data-key")!], text: null });
+      else setClaudeSel({ keys: [], text: null });
+    };
+    document.addEventListener("selectionchange", onSelChange);
+    root.addEventListener("click", onClick);
+    return () => {
+      document.removeEventListener("selectionchange", onSelChange);
+      root.removeEventListener("click", onClick);
+    };
+  }, [mode]);
 
   // Measure rendered layout (text overflow past its box + off-canvas) and report
   // it, so the agent can see and fix visual problems the model alone can't predict.
@@ -116,7 +156,13 @@ export function SlideCanvas({
         >
           <SelectionContext.Provider value={selection}>
             {elements.map((e, i) => (
-              <ElementView key={i} e={e} slideId={slide.id} scale={scale} />
+              <ElementView
+                key={i}
+                e={e}
+                slideId={slide.id}
+                scale={scale}
+                ctxSelected={mode === "select" && claudeSel.keys.includes(e.key)}
+              />
             ))}
           </SelectionContext.Provider>
           {selection.marquee && (
@@ -155,3 +201,32 @@ export function SlideCanvas({
 }
 
 export const STAGE = { w: STAGE_W, h: STAGE_H };
+
+// Read the current native text selection as a TextSel, or null if it is collapsed,
+// empty, or outside the stage. Locates the enclosing element (data-key) + deck
+// field (data-source) and the char offset of the selection within the element.
+function readTextSel(root: HTMLElement): TextSel | null {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const text = sel.toString();
+  if (!text.trim()) return null;
+  const range = sel.getRangeAt(0);
+  const ancEl = range.commonAncestorContainer.nodeType === 1
+    ? (range.commonAncestorContainer as HTMLElement)
+    : range.commonAncestorContainer.parentElement;
+  const frame = ancEl?.closest(".el-frame[data-key]") as HTMLElement | null;
+  if (!frame || !root.contains(frame)) return null;
+  const pre = document.createRange();
+  pre.selectNodeContents(frame);
+  try {
+    pre.setEnd(range.startContainer, range.startOffset);
+  } catch {
+    /* start outside frame: leave offset at 0 */
+  }
+  const start = pre.toString().length;
+  const startEl = range.startContainer.nodeType === 1
+    ? (range.startContainer as HTMLElement)
+    : range.startContainer.parentElement;
+  const path = startEl?.closest("[data-source]")?.getAttribute("data-source") ?? undefined;
+  return { elementKey: frame.getAttribute("data-key")!, path, text, start, end: start + text.length };
+}
