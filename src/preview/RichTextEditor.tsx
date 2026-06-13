@@ -122,7 +122,7 @@ export function RichTextEditor({
   useEffect(() => {
     if (!picker) return;
     const onDown = (e: MouseEvent) => {
-      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) finishPicker();
+      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) finishPicker(e.target as Node);
     };
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
@@ -200,10 +200,15 @@ export function RichTextEditor({
     if (editor && s) editor.chain().setTextSelection(s).focus().run();
   }
 
-  // Close because the user clicked outside the bubble: finish editing + commit.
-  function finishPicker() {
+  // A mousedown outside the bubble closes the picker. If it landed back inside
+  // this editor (the user is re-selecting text), keep editing so the bubble
+  // re-shows for the new selection - the editor never lost DOM focus, so we must
+  // NOT force `focused` false here or `onFocus` won't fire to restore it. Only
+  // when focus truly leaves the editor do we finalize (commit + blur).
+  function finishPicker(target: Node) {
     pickerOpenRef.current = false;
     setPicker(null);
+    if (editor && editor.view.dom.contains(target)) return; // re-selecting; keep editing
     setFocused(false);
     commit();
   }
