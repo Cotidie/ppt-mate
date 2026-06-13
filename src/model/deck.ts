@@ -11,6 +11,7 @@ export type Span = {
   underline?: boolean;
   color?: string;     // hex
   highlight?: string; // hex
+  size?: number;      // pt, overrides the paragraph/element default for this run
 };
 
 export type RichText = Span[];

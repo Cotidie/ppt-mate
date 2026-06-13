@@ -31,7 +31,7 @@ function addTextEl(slide: pptxgen.Slide, e: Extract<Element, { kind: "text" }>) 
           highlight: r.highlight ? hex(r.highlight) : undefined,
           color: hex(r.color ?? p.color ?? e.color),
           fontFace: p.font ?? e.font,
-          fontSize: p.size ?? e.size,
+          fontSize: r.size ?? p.size ?? e.size,
           align: p.align ?? e.align ?? "left",
           bullet: p.bullet ? { indent: 14 + (p.indentLevel ?? 0) * 14 } : false,
           indentLevel: p.indentLevel ?? 0,

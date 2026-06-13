@@ -15,6 +15,7 @@ import Bold from "@tiptap/extension-bold";
 import Italic from "@tiptap/extension-italic";
 import Underline from "@tiptap/extension-underline";
 import { TextStyle } from "@tiptap/extension-text-style";
+import { FontSize } from "@tiptap/extension-text-style/font-size";
 import { Color } from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
 import { HexColorPicker, HexColorInput } from "react-colorful";
@@ -47,14 +48,21 @@ const HIGHLIGHT_SWATCHES: Swatch[] = [
 // Single-paragraph schema: no hard breaks, so Enter is free to commit.
 const OneLineDocument = Document.extend({ content: "paragraph" });
 
+const PT_PX = 96 / 72;
+const SIZE_STEP = 2;
+const SIZE_MIN = 8;
+const SIZE_MAX = 160;
+
 export function RichTextEditor({
   slideId,
   path,
   spans,
+  defaultSize = 18,
 }: {
   slideId: string;
   path: string;
   spans: Span[];
+  defaultSize?: number; // pt the field falls back to when a run has no explicit size
 }) {
   const mode = useMode();
   const editable = mode === "edit";
@@ -63,6 +71,8 @@ export function RichTextEditor({
   const [picker, setPicker] = useState<"text" | "highlight" | null>(null);
   // The hex the picker UI currently shows (controlled value for react-colorful).
   const [draft, setDraft] = useState("#000000");
+  // Text typed into the size field while it has focus; null shows the live size.
+  const [sizeField, setSizeField] = useState<string | null>(null);
   // Synchronous mirror of `picker` for the onBlur guard, the selection to apply
   // colors to (the picker steals DOM focus, so we operate on a saved range), and
   // a ref to the bubble for outside-click detection.
@@ -89,6 +99,7 @@ export function RichTextEditor({
       Italic,
       Underline,
       TextStyle,
+      FontSize,
       Color,
       Highlight.configure({ multicolor: true }),
     ],
@@ -116,6 +127,20 @@ export function RichTextEditor({
   useEffect(() => {
     editor?.setEditable(editable);
   }, [editor, editable]);
+
+  // Re-render when the editor state changes (selection / marks) so the bubble's
+  // live readouts - active B/I/U, current color, current font size - stay in
+  // sync. Without this, values read from editor.getAttributes go stale and the
+  // size stepper would step from a frozen base.
+  const [, bumpRender] = useState(0);
+  useEffect(() => {
+    if (!editor) return;
+    const update = () => bumpRender((n) => n + 1);
+    editor.on("transaction", update);
+    return () => {
+      editor.off("transaction", update);
+    };
+  }, [editor]);
 
   // Pull external changes (the chat agent editing deck.json) into the editor -
   // but never while the user is typing in it, and never when it already matches.
@@ -232,6 +257,28 @@ export function RichTextEditor({
     commit();
   }
 
+  // --- Font size -----------------------------------------------------------
+  // The current selection's size in pt: its run's fontSize mark, else the field
+  // default (paragraph/element size).
+  const fontSizeAttr = editor?.getAttributes("textStyle").fontSize as string | undefined;
+  const currentSize = fontSizeAttr ? Math.round(parseFloat(fontSizeAttr) / PT_PX) : defaultSize;
+
+  // Apply to the live selection (buttons keep editor focus via preventDefault).
+  function applySize(pt: number) {
+    if (!editor) return;
+    const clamped = Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round(pt)));
+    editor.chain().focus().setFontSize(`${clamped * PT_PX}px`).run();
+  }
+
+  // The size <input> steals focus, so it saves the selection on focus (like the
+  // color hex field) and applies to that saved range; blur refocuses it.
+  function applySizeToSaved(pt: number) {
+    const s = savedSel.current;
+    if (!editor || !s) return;
+    const clamped = Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round(pt)));
+    editor.chain().setTextSelection(s).setFontSize(`${clamped * PT_PX}px`).run();
+  }
+
   return (
     <span
       className={
@@ -299,6 +346,49 @@ export function RichTextEditor({
                 >
                   H
                 </span>
+              </button>
+              <span className="rt-sep" />
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applySize(currentSize - SIZE_STEP)}
+                title="Decrease font size"
+              >
+                −
+              </button>
+              <input
+                className="rt-size-input"
+                type="text"
+                inputMode="numeric"
+                value={sizeField ?? String(currentSize)}
+                title="Font size (pt)"
+                onChange={(e) => {
+                  setSizeField(e.target.value);
+                  const n = parseInt(e.target.value, 10);
+                  if (Number.isFinite(n)) applySizeToSaved(n);
+                }}
+                onFocus={() => {
+                  if (editor) {
+                    const { from, to } = editor.state.selection;
+                    savedSel.current = { from, to };
+                  }
+                  pickerOpenRef.current = true;
+                  setSizeField(String(currentSize));
+                }}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                onBlur={() => {
+                  setSizeField(null);
+                  closePicker(); // clears the focus guard + refocuses the saved range
+                }}
+              />
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applySize(currentSize + SIZE_STEP)}
+                title="Increase font size"
+              >
+                +
               </button>
             </div>
             {picker && (

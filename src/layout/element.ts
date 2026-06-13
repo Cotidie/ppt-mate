@@ -12,6 +12,7 @@ export type Run = {
   underline?: boolean;
   color?: string;
   highlight?: string;
+  size?: number; // pt, overrides the paragraph/element default for this run
 };
 
 export type Para = {

@@ -692,6 +692,23 @@ body.gesture-active * {
 .rt-bubble button.on {
   background: #3b6fd4;
 }
+/* Font-size stepper: the - / + reuse .rt-bubble button; the value is a compact
+   click-to-type field. */
+.rt-size-input {
+  width: 34px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: #11182b;
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+  padding: 0;
+}
+.rt-size-input:focus {
+  outline: none;
+  border-color: #3b6fd4;
+}
 /* The A/H glyph carries a colored underline showing the current color. */
 .rt-glyph {
   display: inline-block;

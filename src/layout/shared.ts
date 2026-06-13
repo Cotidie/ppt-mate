@@ -20,6 +20,7 @@ export function spansToRuns(spans: Span[]): Run[] {
     underline: s.underline,
     color: s.color,
     highlight: s.highlight,
+    size: s.size,
   }));
 }
 

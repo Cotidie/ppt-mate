@@ -169,13 +169,15 @@ const justify: Record<VAlign, CSSProperties["justifyContent"]> = {
   bottom: "flex-end",
 };
 
-function runStyle(r: { bold?: boolean; italic?: boolean; underline?: boolean; color?: string; highlight?: string }): CSSProperties {
+function runStyle(r: { bold?: boolean; italic?: boolean; underline?: boolean; color?: string; highlight?: string; size?: number }): CSSProperties {
   return {
     fontWeight: r.bold ? 700 : undefined,
     fontStyle: r.italic ? "italic" : undefined,
     textDecoration: r.underline ? "underline" : undefined,
     color: r.color,
     background: r.highlight,
+    // Run-level size (pt -> px); unsized runs inherit the paragraph/element size.
+    fontSize: r.size ? r.size * PT_PX : undefined,
   };
 }
 
@@ -193,9 +195,9 @@ function renderRuns(runs: Run[]) {
 }
 
 // One table cell's content: editable when it carries a source, else plain runs.
-function CellContent({ slideId, source, runs }: { slideId: string; source?: string; runs: Run[] }) {
+function CellContent({ slideId, source, runs, defaultSize }: { slideId: string; source?: string; runs: Run[]; defaultSize: number }) {
   if (!source) return <>{renderRuns(runs)}</>;
-  return <RichTextEditor slideId={slideId} path={source} spans={asSpans(runs)} />;
+  return <RichTextEditor slideId={slideId} path={source} spans={asSpans(runs)} defaultSize={defaultSize} />;
 }
 
 function Paragraph({
@@ -243,7 +245,7 @@ function Paragraph({
   // The content slot: editable (rich text) or static runs. Under a bullet it's a
   // flex:1 column so the block editor takes the remaining width and wraps there.
   const content = p.source ? (
-    <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)} />
+    <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)} defaultSize={p.size ?? defSize} />
   ) : (
     renderRuns(p.runs)
   );
@@ -305,7 +307,7 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
                   border: `1px solid ${e.borderColor}`,
                 }}
               >
-                <CellContent slideId={slideId} source={c.source} runs={c.runs} />
+                <CellContent slideId={slideId} source={c.source} runs={c.runs} defaultSize={e.size} />
               </th>
             ))}
           </tr>
@@ -326,7 +328,7 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
                     border: `1px solid ${e.borderColor}`,
                   }}
                 >
-                  <CellContent slideId={slideId} source={cell.source} runs={cell.runs} />
+                  <CellContent slideId={slideId} source={cell.source} runs={cell.runs} defaultSize={e.size} />
                 </td>
               ))}
             </tr>

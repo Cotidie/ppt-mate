@@ -4,11 +4,15 @@
 
 import type { Span } from "../model/deck";
 
+// Points <-> pixels: the model stores sizes in pt, the editor (and CSS) in px.
+const PT_PX = 96 / 72;
+
 type Mark =
   | { type: "bold" }
   | { type: "italic" }
   | { type: "underline" }
-  | { type: "textStyle"; attrs: { color: string } }
+  // Color and font size are both attributes of the single textStyle mark.
+  | { type: "textStyle"; attrs: { color?: string | null; fontSize?: string | null } }
   | { type: "highlight"; attrs: { color: string } };
 
 type TextNode = { type: "text"; text: string; marks?: Mark[] };
@@ -26,7 +30,13 @@ export function spansToDoc(spans: Span[]): PMDoc {
       if (s.bold) marks.push({ type: "bold" });
       if (s.italic) marks.push({ type: "italic" });
       if (s.underline) marks.push({ type: "underline" });
-      if (s.color) marks.push({ type: "textStyle", attrs: { color: s.color } });
+      // color + fontSize share one textStyle mark
+      if (s.color || s.size) {
+        const attrs: { color?: string; fontSize?: string } = {};
+        if (s.color) attrs.color = s.color;
+        if (s.size) attrs.fontSize = `${s.size * PT_PX}px`;
+        marks.push({ type: "textStyle", attrs });
+      }
       if (s.highlight) marks.push({ type: "highlight", attrs: { color: s.highlight } });
       return marks.length ? { type: "text", text: s.text, marks } : { type: "text", text: s.text };
     });
@@ -46,8 +56,10 @@ export function docToSpans(doc: PMDoc): Span[] {
         if (m.type === "bold") span.bold = true;
         else if (m.type === "italic") span.italic = true;
         else if (m.type === "underline") span.underline = true;
-        else if (m.type === "textStyle" && m.attrs.color) span.color = m.attrs.color;
-        else if (m.type === "highlight" && m.attrs.color) span.highlight = m.attrs.color;
+        else if (m.type === "textStyle") {
+          if (m.attrs.color) span.color = m.attrs.color;
+          if (m.attrs.fontSize) span.size = Math.round(parseFloat(m.attrs.fontSize) / PT_PX);
+        } else if (m.type === "highlight" && m.attrs.color) span.highlight = m.attrs.color;
       }
       return span;
     });
@@ -70,6 +82,7 @@ function sameMarks(a: Span, b: Span): boolean {
     a.italic === b.italic &&
     a.underline === b.underline &&
     a.color === b.color &&
-    a.highlight === b.highlight
+    a.highlight === b.highlight &&
+    a.size === b.size
   );
 }
