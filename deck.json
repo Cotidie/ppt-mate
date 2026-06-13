@@ -173,7 +173,13 @@
         {
           "text": "Both teams share the original human annotations as ground truth for evaluation."
         }
-      ]
+      ],
+      "overrides": {
+        "card.1.body": {
+          "dw": -0.08990772983484102,
+          "dh": 0.6802448473478618
+        }
+      }
     },
     {
       "id": "issue-budget",
