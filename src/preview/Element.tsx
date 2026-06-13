@@ -2,7 +2,7 @@
 // points -> px at 96/72. This is the ONLY place geometry becomes pixels in the preview.
 
 import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import type { Element, Para, Run, VAlign } from "../layout/element";
+import type { Align, Element, Para, Run, VAlign } from "../layout/element";
 import type { Span } from "../model/deck";
 import { PX_PER_IN } from "../theme/theme";
 import { RichTextEditor } from "./RichTextEditor";
@@ -126,6 +126,7 @@ function Paragraph({
   defFont,
   defSize,
   defColor,
+  defAlign,
   lineHeightPt,
 }: {
   p: Para;
@@ -133,6 +134,7 @@ function Paragraph({
   defFont: string;
   defSize: number;
   defColor: string;
+  defAlign?: Align;
   lineHeightPt?: number;
 }) {
   const size = (p.size ?? defSize) * PT_PX;
@@ -144,7 +146,9 @@ function Paragraph({
     lineHeight: lineHeightPt ? `${lineHeightPt * PT_PX}px` : 1.3,
     color: p.color ?? defColor,
     fontWeight: p.bold ? 700 : 400,
-    textAlign: p.align ?? "left",
+    // Honor the element-level align (e.g. centered closing title, table verdict),
+    // matching the exporter which passes e.align. Paragraph align still wins.
+    textAlign: p.align ?? defAlign ?? "left",
     paddingLeft: p.bullet ? 16 + (p.indentLevel ?? 0) * 18 : 0,
     textIndent: p.bullet ? -16 : 0,
   };
@@ -273,6 +277,7 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
           defFont={e.font}
           defSize={e.size}
           defColor={e.color}
+          defAlign={e.align}
           lineHeightPt={e.lineHeightPt}
         />
       ))}
