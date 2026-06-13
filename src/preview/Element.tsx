@@ -81,7 +81,11 @@ function useElementGesture(slideId: string, key: string, scale: number, base: Ge
       const mx = mxPx / (PX_PER_IN * scale);
       const my = myPx / (PX_PER_IN * scale);
       if (dir) {
-        last = dirDelta(dir, mx, my, base.w, base.h);
+        // Resize: snap the dragged edge(s) to nearby element lines (Alt bypasses);
+        // derive the delta from the snapped box. The controller draws the guides.
+        const cand = applyDelta(base, dirDelta(dir, mx, my, base.w, base.h));
+        const box = sel.snapResizeBox(cand, dir, [key], scale, ev.altKey);
+        last = { dx: box.x - base.x, dy: box.y - base.y, dw: box.w - base.w, dh: box.h - base.h };
       } else {
         // Move: snap the candidate box to nearby element alignment lines (Alt
         // bypasses). The correction is added to the raw delta; the controller

@@ -5,6 +5,26 @@ import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
 
+// Claude account info (from /api/account) + live session stats (from chat `meta`
+// SSE frames). Shown in the dock's left panel.
+type Account = {
+  loggedIn?: boolean;
+  email?: string;
+  authMethod?: string;
+  subscriptionType?: string;
+  orgName?: string;
+  model?: string;
+};
+// One `meta` SSE frame: model (once, on init) or context gauge (per result).
+type MetaFrame = { model?: string; contextUsed?: number; contextWindow?: number };
+// Accumulated session stats shown in the panel. contextUsed/Window are
+// point-in-time (latest turn), not summed.
+type Stats = { model?: string; contextUsed?: number; contextWindow?: number };
+
+// 5h / 7d usage limits from /api/usage.
+type Win = { utilization: number; resetsAt: string };
+type ApiUsage = { available: boolean; fiveHour?: Win | null; sevenDay?: Win | null };
+
 const HEIGHT_MIN = 140;
 const HEIGHT_HIDE_AT = 60; // drag shorter than this and the dock snaps shut
 const HEIGHT_KEY = "ppt.chatHeight";
@@ -18,12 +38,31 @@ export function ChatDock() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [stats, setStats] = useState<Stats>({});
+  const [usage, setUsage] = useState<ApiUsage | null>(null);
   const height = useChatHeight();
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [messages]);
+
+  // Who's signed in + plan; one-shot on mount (server caches it).
+  useEffect(() => {
+    fetch("/api/account")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((a) => a && setAccount(a))
+      .catch(() => {});
+    refreshUsage();
+  }, []);
+
+  const refreshUsage = () => {
+    fetch("/api/usage")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u: ApiUsage | null) => u && setUsage(u))
+      .catch(() => {});
+  };
 
   const send = async () => {
     const message = input.trim();
@@ -37,6 +76,7 @@ export function ChatDock() {
       applyEvent({ kind: "error", text: String(err) });
     } finally {
       setStreaming(false);
+      refreshUsage();
     }
   };
 
@@ -47,6 +87,7 @@ export function ChatDock() {
     if (streaming) return;
     await fetch("/api/chat/reset", { method: "POST" }).catch(() => {});
     setMessages([]);
+    setStats((s) => ({ model: s.model })); // fresh session: context gauge resets
   };
 
   // Folds a parsed SSE event into the message list. Assistant text deltas append
@@ -54,6 +95,12 @@ export function ChatDock() {
   const applyEvent = (ev: ChatEvent) => {
     if (ev.kind === "delta") appendToLast(setMessages, ev.text);
     else if (ev.kind === "error") setMessages((m) => [...m, { role: "error", text: ev.text }]);
+    else if (ev.kind === "meta")
+      setStats((prev) => ({
+        model: ev.meta.model ?? prev.model,
+        contextUsed: ev.meta.contextUsed ?? prev.contextUsed,
+        contextWindow: ev.meta.contextWindow ?? prev.contextWindow,
+      }));
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -81,7 +128,9 @@ export function ChatDock() {
         <span className="resizer-grip resizer-grip-h" aria-hidden="true" />
       </div>
       {hidden ? null : (
-        <>
+        <div className="chat-body">
+      <AccountPanel account={account} stats={stats} usage={usage} />
+      <div className="chat-col">
       <div className="chat-log" ref={logRef}>
         {messages.map((m, i) => (
           <div key={i} className={"chat-msg chat-" + m.role}>
@@ -123,9 +172,100 @@ export function ChatDock() {
           )}
         </div>
       </div>
-        </>
+      </div>
+        </div>
       )}
     </div>
+  );
+}
+
+// Format a token count as e.g. "28K" or "1.0M".
+function fmtTok(n: number): string {
+  return n < 1_000_000 ? Math.round(n / 1000) + "K" : (n / 1_000_000).toFixed(1) + "M";
+}
+
+// Format remaining time until an ISO reset timestamp. Returns e.g. "5d 19h" or
+// "3h 10m". Returns "" if the date is invalid or already past.
+function fmtRemaining(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!ms || ms <= 0) return "";
+  const totalMin = Math.round(ms / 60_000);
+  const days = Math.floor(totalMin / 1440);
+  const hrs = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return `${days}d ${hrs}h`;
+  return `${hrs}h ${mins}m`;
+}
+
+// A single usage bar: label on the left (e.g. "5h"), percentage + detail on the
+// right, with a thin track/fill below. No bar or percentage rendered when data
+// is missing. Orange fill at ≥ 90%.
+function UsageGauge({ label, pct, detail }: { label: string; pct: number | null; detail: string }) {
+  return (
+    <div className="cp-gauge">
+      <div className="cp-gauge-head">
+        <span className="cp-gauge-label">{label}</span>
+        {pct != null ? (
+          <>
+            <span className="cp-gauge-pct">{Math.round(pct)}%</span>
+            <span className="cp-gauge-detail">{detail}</span>
+          </>
+        ) : (
+          <span className="cp-gauge-detail">—</span>
+        )}
+      </div>
+      {pct != null && (
+        <div className="cp-gauge-bar">
+          <div className={"cp-gauge-fill" + (pct >= 90 ? " warn" : "")} style={{ width: `${Math.min(100, pct)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Left-rail panel inside the dock: Claude account, active model, and usage
+// gauges (context window, 5h, 7d). Account comes from /api/account; model and
+// context tokens from chat stream `meta` frames; 5h/7d from /api/usage.
+function AccountPanel({ account, stats, usage }: { account: Account | null; stats: Stats; usage: ApiUsage | null }) {
+  const model = stats.model ?? account?.model;
+  const ctxPct = stats.contextUsed != null && stats.contextWindow
+    ? stats.contextUsed / stats.contextWindow * 100
+    : null;
+  const ctxDetail = stats.contextUsed != null && stats.contextWindow
+    ? `${fmtTok(stats.contextUsed)}/${fmtTok(stats.contextWindow)}`
+    : "—";
+  const fh = usage?.fiveHour;
+  const sd = usage?.sevenDay;
+  return (
+    <aside className="chat-panel">
+      <div className="cp-section">
+        <div className="cp-head">
+          <span className="cp-label">Account</span>
+          {account?.subscriptionType && (
+            <span className="cp-badge">{account.subscriptionType}</span>
+          )}
+        </div>
+        <div className="cp-value" title={account?.email}>{account?.email ?? "…"}</div>
+      </div>
+      <div className="cp-section">
+        <div className="cp-label">Model</div>
+        <div className="cp-value" title={model}>{model ?? "…"}</div>
+      </div>
+      <div className="cp-section">
+        <div className="cp-label">Usage</div>
+        <UsageGauge label="Ctx" pct={ctxPct} detail={ctxDetail} />
+        <UsageGauge
+          label="5h"
+          pct={fh?.utilization ?? null}
+          detail={fh ? `(${fmtRemaining(fh.resetsAt)})` : "—"}
+        />
+        <UsageGauge
+          label="7d"
+          pct={sd?.utilization ?? null}
+          detail={sd ? `(${fmtRemaining(sd.resetsAt)})` : "—"}
+        />
+      </div>
+    </aside>
   );
 }
 
@@ -168,7 +308,8 @@ function snapHeight(px: number): number {
 
 type ChatEvent =
   | { kind: "delta"; text: string }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  | { kind: "meta"; meta: MetaFrame };
 
 // POSTs the message and reads the SSE response via fetch-event-source, handing
 // the caller a normalized ChatEvent per frame. Resolves when the server ends the
@@ -220,6 +361,13 @@ function toEvent(event: string, data: string): ChatEvent | null {
       /* fall back to raw */
     }
     return { kind: "error", text: text || "Claude Code failed to start." };
+  }
+  if (event === "meta") {
+    try {
+      return { kind: "meta", meta: JSON.parse(data) as MetaFrame };
+    } catch {
+      return null;
+    }
   }
   return null;
 }

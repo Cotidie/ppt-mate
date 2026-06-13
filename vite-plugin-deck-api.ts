@@ -6,6 +6,7 @@
 import type { Plugin, Connect } from "vite";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
 import { readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -14,7 +15,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
 const OUT_DIR = resolve(HERE, "out");
+const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
+const CREDS_PATH = resolve(homedir(), ".claude/.credentials.json");
 
 // Captured so the export route can load the TypeScript exporter through Vite's
 // transform pipeline (ssrLoadModule) - plain Node can't import the .mts/.ts directly.
@@ -33,6 +36,8 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/export", handleExport);
+      server.middlewares.use("/api/account", handleAccount);
+      server.middlewares.use("/api/usage", handleUsage);
       server.middlewares.use("/api/chat/reset", handleChatReset);
       server.middlewares.use("/api/chat", handleChat);
       bindShutdown(server.httpServer);
@@ -99,6 +104,89 @@ function handleChatReset(req: IncomingMessage, res: ServerResponse, next: Connec
   if (req.method !== "POST") return next();
   claude.reset();
   sendJson(res, 200, { ok: true });
+}
+
+// Claude account info for the ChatDock panel: who's signed in and on what plan.
+// Pulled from `claude auth status --json` (the only programmatic source). Cached
+// for the dev-server lifetime since auth rarely changes mid-session; a failed
+// read drops the cache so the next request retries.
+let accountCache: Promise<unknown> | null = null;
+
+function handleAccount(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "GET") return next();
+  (accountCache ??= readAccount()).then(
+    (info) => sendJson(res, 200, info),
+    (err) => {
+      accountCache = null;
+      sendJson(res, 500, { error: String(err) });
+    },
+  );
+}
+
+function readAccount(): Promise<unknown> {
+  return new Promise((resolveAcct, reject) => {
+    const child = spawn(CLAUDE_BIN, ["auth", "status", "--json"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.on("error", reject);
+    child.on("exit", () => {
+      try {
+        const j = JSON.parse(out);
+        resolveAcct({
+          loggedIn: j.loggedIn,
+          email: j.email,
+          authMethod: j.authMethod,
+          subscriptionType: j.subscriptionType,
+          orgName: j.orgName,
+          model: CLAUDE_MODEL, // alias; the live model id arrives via the chat stream's `meta`
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+// Claude usage limits for the ChatDock panel: 5-hour and 7-day rolling windows.
+// Fetched from the OAuth usage endpoint (requires the access token from the
+// credentials file that the CLI keeps refreshed). Cached 30s to avoid hammering
+// the API on every chat turn; on any failure, returns `{available:false}` so the
+// panel degrades to "—" rather than erroring.
+type UsageCache = { value: unknown; at: number } | null;
+let usageCache: UsageCache = null;
+const USAGE_TTL_MS = 30_000;
+
+function handleUsage(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "GET") return next();
+  const now = Date.now();
+  const cached = usageCache && now - usageCache.at < USAGE_TTL_MS ? usageCache.value : null;
+  if (cached) { sendJson(res, 200, cached); return; }
+  readUsage().then(
+    (info) => { usageCache = { value: info, at: Date.now() }; sendJson(res, 200, info); },
+    () => sendJson(res, 200, { available: false }),
+  );
+}
+
+async function readUsage(): Promise<unknown> {
+  const creds = JSON.parse(await readFile(CREDS_PATH, "utf8"));
+  const token: string = creds?.claudeAiOauth?.accessToken;
+  if (!token) return { available: false };
+  const r = await fetch("https://api.anthropic.com/api/oauth/usage", {
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "anthropic-beta": "oauth-2025-04-20",
+      "anthropic-version": "2023-06-01",
+    },
+  });
+  if (!r.ok) return { available: false };
+  const j = await r.json() as { five_hour?: { utilization?: number; resets_at?: string }; seven_day?: { utilization?: number; resets_at?: string } };
+  return {
+    available: true,
+    fiveHour: j.five_hour ? { utilization: j.five_hour.utilization ?? 0, resetsAt: j.five_hour.resets_at ?? "" } : null,
+    sevenDay: j.seven_day ? { utilization: j.seven_day.utilization ?? 0, resetsAt: j.seven_day.resets_at ?? "" } : null,
+  };
 }
 
 // A single persistent Claude Agent SDK session per dev server, driven in
@@ -171,7 +259,27 @@ class ClaudeSession {
         if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
           this.send("delta", JSON.stringify(ev.delta.text));
         }
+      } else if (msg.type === "system" && (msg as { subtype?: string }).subtype === "init") {
+        // Init carries the resolved model id (e.g. "claude-opus-4-8"), once per session.
+        const model = (msg as { model?: string }).model;
+        if (model) this.send("meta", JSON.stringify({ model }));
       } else if (msg.type === "result") {
+        // Context-window gauge: how many tokens have been consumed this session and
+        // how large the window is, so the panel can show e.g. "110K / 1.0M  11%".
+        type ResultMsg = {
+          usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+          modelUsage?: Record<string, { contextWindow?: number }>;
+        };
+        const r = msg as ResultMsg;
+        const u = r.usage;
+        if (u) {
+          const contextUsed = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+          const models = r.modelUsage ? Object.values(r.modelUsage) : [];
+          const contextWindow = models[0]?.contextWindow ?? 1_000_000;
+          this.send("meta", JSON.stringify({ contextUsed, contextWindow }));
+          // Invalidate the usage cache so the next /api/usage call fetches fresh 5h/7d data.
+          usageCache = null;
+        }
         this.endTurn?.();
       }
     }

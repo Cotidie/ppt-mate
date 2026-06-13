@@ -4,6 +4,7 @@ import type { Deck } from "./model/deck";
 import { SlideCanvas } from "./preview/SlideCanvas";
 import { ChatDock } from "./preview/ChatDock";
 import { Toolbox, type ZoomAction } from "./preview/Toolbox";
+import { Settings } from "./preview/Settings";
 import { ModeContext, type Mode } from "./preview/mode";
 import deckJson from "../deck.json";
 
@@ -158,6 +159,8 @@ export default function App() {
         </ModeContext.Provider>
         <ChatDock />
       </main>
+
+      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

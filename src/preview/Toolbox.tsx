@@ -85,13 +85,6 @@ export function Toolbox({
       <ToolButton label="Settings" active={settingsOpen} onClick={onToggleSettings}>
         <GearIcon />
       </ToolButton>
-
-      {settingsOpen && (
-        <div className="settings-panel" role="dialog" aria-label="Settings">
-          <div className="settings-panel-title">Settings</div>
-          <div className="settings-panel-body">Coming soon.</div>
-        </div>
-      )}
     </div>
   );
 }
