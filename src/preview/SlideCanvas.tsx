@@ -35,17 +35,30 @@ export function SlideCanvas({ slide, footerText }: { slide: Slide; footerText: s
     return () => window.removeEventListener("resize", fit);
   }, []);
 
-  // Start an instant drag on whichever element was pressed (delegated). Bail when
-  // pressing inside an active editor so text selection / the toolbar keep the
-  // pointer. flushSync applies the target synchronously so dragStart can attach
-  // to this same pointerdown.
+  // Grab-and-drag in one gesture: on pointerdown, make the pressed element the
+  // Moveable target and hand the SAME native event to dragStart synchronously, so
+  // Moveable owns the whole drag (it handles the scaled stage itself). Bail inside
+  // an active editor so text selection / the toolbar keep the pointer.
+  const dragged = useRef(false);
+
   const onStagePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     const node = (e.target as HTMLElement).closest<HTMLElement>("[data-elkey]");
     if (!node || (e.target as HTMLElement).closest(".slide-editable.editing")) return;
-    flushSync(() => setTarget(node));
+    dragged.current = false;
+    flushSync(() => setTarget(node)); // sync so the target exists for dragStart
     moveableRef.current?.dragStart(e.nativeEvent);
   };
+
+  // A press that ends without an actual drag is a click (or double-click to edit):
+  // clear the control box so it never lingers over an idle element.
+  useEffect(() => {
+    const up = () => {
+      if (!dragged.current) setTarget(null);
+    };
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, []);
 
   const elements = resolveSlide(slide, theme, footerText);
 
@@ -87,7 +100,11 @@ export function SlideCanvas({ slide, footerText }: { slide: Slide; footerText: s
             verticalGuidelines={[STAGE_W / 2]}
             horizontalGuidelines={[STAGE_H / 2]}
             bounds={{ left: 0, top: 0, right: STAGE_W, bottom: STAGE_H, position: "css" }}
+            onDragStart={() => {
+              dragged.current = false;
+            }}
             onDrag={({ target: t, transform }) => {
+              dragged.current = true;
               (t as HTMLElement).style.transform = transform;
             }}
             onDragEnd={({ target: t, lastEvent }) => {
@@ -95,9 +112,9 @@ export function SlideCanvas({ slide, footerText }: { slide: Slide; footerText: s
               const key = node.dataset.elkey;
               const dist = lastEvent?.dist as [number, number] | undefined;
               if (key && dist && (dist[0] || dist[1])) {
-                // Moveable reports the drag distance in the stage's own (unscaled)
-                // pixels; convert straight to inches. HMR repaints with the new
-                // offset and clears the inline transform.
+                // Moveable maps the drag into the target's own (unscaled stage)
+                // coordinates, so dist is in stage px -> inches directly. HMR
+                // repaints with the new offset and clears the inline transform.
                 void commitMove(slide.id, key, dist[0] / PX_PER_IN, dist[1] / PX_PER_IN);
               }
               setTarget(null);
