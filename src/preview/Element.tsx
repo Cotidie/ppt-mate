@@ -341,10 +341,10 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
     <div
       style={{
         width: "100%",
-        // Auto-grow: the box is never shorter than its laid-out height (so
-        // un-resized boxes look unchanged and valign still works) but grows
-        // downward as rewrapped text needs more lines.
-        minHeight: "100%",
+        // Fill the frame's height (which is at least the laid-out height, and
+        // grows when text wraps) so vertical alignment has a definite box to
+        // resolve against - otherwise middle/bottom valign collapses to top.
+        flex: 1,
         display: "flex",
         flexDirection: "column",
         justifyContent: justify[e.valign ?? "top"],
@@ -400,8 +400,12 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
     left: inPx(x),
     top: inPx(y),
     width: inPx(w),
-    // Text frames auto-grow (min height); other kinds keep a fixed box.
-    ...(isText ? { minHeight: inPx(h) } : { height: inPx(h) }),
+    // Text frames auto-grow (min height) and host their content as a flex column
+    // so the content can fill the box height (needed for middle/bottom valign);
+    // other kinds keep a fixed box.
+    ...(isText
+      ? { minHeight: inPx(h), display: "flex", flexDirection: "column" }
+      : { height: inPx(h) }),
     // Non-text content clips to its box; text overflows so auto-grow shows, and
     // so the editor's floating BubbleMenu isn't cropped.
     overflow: isText ? "visible" : "hidden",
