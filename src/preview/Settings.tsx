@@ -1,8 +1,7 @@
 // Settings modal: a centered dialog with a left tab list and two panes. "Design"
-// surfaces theme.json (the design system) as editable tokens; each field commits
-// one dotted path to /api/theme/edit, whose write triggers Vite HMR (a full reload
-// that re-renders the preview with the new tokens). "Model" shows the signed-in
-// account, configured model, and rolling usage, read from /api/account + /api/usage.
+// displays theme.json (the design system) as read-only key/value pairs. "Model"
+// shows the signed-in account, configured model, and rolling usage, read from
+// /api/account + /api/usage.
 
 import { useEffect, useState } from "react";
 import { theme } from "../theme/theme";
@@ -18,16 +17,6 @@ type Account = {
 type Win = { utilization: number; resetsAt: string };
 type Usage = { available: boolean; fiveHour?: Win | null; sevenDay?: Win | null };
 
-// One token write. After the server rewrites theme.json, HMR reloads the page, so
-// there's no client state to update here.
-async function commitTheme(path: string, value: unknown): Promise<void> {
-  await fetch("/api/theme/edit", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path, value }),
-  }).catch(() => {});
-}
-
 // Time until an ISO reset stamp, e.g. "5d 19h" or "3h 10m".
 function fmtRemaining(iso: string): string {
   const ms = new Date(iso).getTime() - Date.now();
@@ -39,155 +28,67 @@ function fmtRemaining(iso: string): string {
   return days > 0 ? `${days}d ${hrs}h` : `${hrs}h ${mins}m`;
 }
 
-// stopPropagation keeps the app's global ArrowLeft/Right slide-nav from firing
-// while a field has focus; Enter commits and blurs.
-
-function NumberField({ path, value }: { path: string; value: number }) {
-  const [draft, setDraft] = useState(String(value));
-  const commit = () => {
-    const parsed = Number(draft.trim());
-    if (isFinite(parsed) && parsed !== value) commitTheme(path, parsed);
-  };
+// Read-only value row. Numbers/strings render plain; colors get a swatch + hex.
+function Row({ label, value, color }: { label: string; value: string | number; color?: boolean }) {
   return (
-    <input
-      type="number"
-      className="set-input set-num"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") {
-          commit();
-          e.currentTarget.blur();
-        }
-      }}
-    />
+    <div className="set-row">
+      <span className="set-label">{label}</span>
+      {color ? (
+        <span className="set-color">
+          <span className="set-swatch" style={{ background: String(value) }} />
+          <span className="set-value">{value}</span>
+        </span>
+      ) : (
+        <span className="set-value">{value}</span>
+      )}
+    </div>
   );
 }
 
-function TextField({ path, value }: { path: string; value: string }) {
-  const [draft, setDraft] = useState(value);
-  const commit = () => {
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== value) commitTheme(path, trimmed);
-  };
-  return (
-    <input
-      type="text"
-      className="set-input"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") {
-          commit();
-          e.currentTarget.blur();
-        }
-      }}
-    />
-  );
-}
-
-// A swatch (native color input, commits on release) paired with a hex text input
-// (commits on blur/Enter if it's a valid #RRGGBB). Both share one draft.
-function ColorField({ path, value }: { path: string; value: string }) {
-  const [draft, setDraft] = useState(value);
-  const commitHex = (hex: string) => {
-    if (/^#[0-9a-fA-F]{6}$/.test(hex) && hex !== value) commitTheme(path, hex);
-  };
-  return (
-    <span className="set-color">
-      <input
-        type="color"
-        value={draft}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          commitTheme(path, e.target.value);
-        }}
-      />
-      <input
-        type="text"
-        className="set-input set-hex"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => commitHex(draft)}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === "Enter") {
-            commitHex(draft);
-            e.currentTarget.blur();
-          }
-        }}
-      />
-    </span>
-  );
-}
-
+// Design pane is read-only: it displays theme.json (the design system) as
+// formatted key/value pairs. Editing is intentionally not wired up yet.
 function DesignPane() {
   return (
     <div>
       <div className="set-group">
         <div className="set-group-title">Colors</div>
         {Object.entries(theme.colors).map(([key, val]) => (
-          <div className="set-row" key={key}>
-            <span className="set-label">{key}</span>
-            <ColorField path={`colors.${key}`} value={val} />
-          </div>
+          <Row key={key} label={key} value={val} color />
         ))}
       </div>
 
       <div className="set-group">
         <div className="set-group-title">Fonts</div>
-        {(Object.entries(theme.fonts) as [string, string][]).map(([key, val]) => (
-          <div className="set-row" key={key}>
-            <span className="set-label">{key}</span>
-            <TextField path={`fonts.${key}`} value={val} />
-          </div>
+        {Object.entries(theme.fonts).map(([key, val]) => (
+          <Row key={key} label={key} value={val} />
         ))}
       </div>
 
       <div className="set-group">
         <div className="set-group-title">Type (pt)</div>
-        {(Object.entries(theme.type) as [string, number][]).map(([key, val]) => (
-          <div className="set-row" key={key}>
-            <span className="set-label">{key}</span>
-            <NumberField path={`type.${key}`} value={val} />
-          </div>
+        {Object.entries(theme.type).map(([key, val]) => (
+          <Row key={key} label={key} value={val} />
         ))}
       </div>
 
       <div className="set-group">
         <div className="set-group-title">Margin (in)</div>
-        {(Object.entries(theme.margin) as [string, number][]).map(([key, val]) => (
-          <div className="set-row" key={key}>
-            <span className="set-label">{key}</span>
-            <NumberField path={`margin.${key}`} value={val} />
-          </div>
+        {Object.entries(theme.margin).map(([key, val]) => (
+          <Row key={key} label={key} value={val} />
         ))}
       </div>
 
       <div className="set-group">
         <div className="set-group-title">Layout</div>
-        {(Object.entries(theme.layout) as [string, number][]).map(([key, val]) => (
-          <div className="set-row" key={key}>
-            <span className="set-label">{key}</span>
-            <NumberField path={`layout.${key}`} value={val} />
-          </div>
+        {Object.entries(theme.layout).map(([key, val]) => (
+          <Row key={key} label={key} value={val} />
         ))}
       </div>
 
       <div className="set-group">
         <div className="set-group-title">Canvas</div>
-        <div className="set-row">
-          <span className="set-label">w</span>
-          <span className="set-value">{theme.canvas.w}</span>
-        </div>
-        <div className="set-row">
-          <span className="set-label">h</span>
-          <span className="set-value">{theme.canvas.h}</span>
-        </div>
+        <Row label="w" value={theme.canvas.w} />
+        <Row label="h" value={theme.canvas.h} />
         <div className="set-note">Fixed 16:9</div>
       </div>
     </div>
@@ -256,13 +157,7 @@ function ModelPane() {
 }
 
 export function Settings({ onClose }: { onClose: () => void }) {
-  // Active tab persists across the HMR full-page reload that a theme edit triggers.
-  const [tab, setTab] = useState<"design" | "model">(() =>
-    localStorage.getItem("ppt.settingsTab") === "model" ? "model" : "design"
-  );
-  useEffect(() => {
-    localStorage.setItem("ppt.settingsTab", tab);
-  }, [tab]);
+  const [tab, setTab] = useState<"design" | "model">("design");
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
