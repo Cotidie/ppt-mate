@@ -54,6 +54,26 @@ body {
   outline: none;
 }
 
+/* List editor (bullets / cover authors): one editor hosts every paragraph so a
+   selection can span them. Markers + indent are CSS (not text), so a selection
+   sweeps only the editable runs. data-bullet / data-indent come from the
+   paragraph node attributes (see RichParagraph in RichTextEditor.tsx). */
+.slide-editable.rt-list .ProseMirror p {
+  margin: 0 0 8px 0;
+}
+.slide-editable.rt-list .ProseMirror p[data-bullet="true"] {
+  position: relative;
+  padding-left: 1.1em;
+}
+.slide-editable.rt-list .ProseMirror p[data-bullet="true"]::before {
+  content: "\2022";
+  position: absolute;
+  left: 0.15em;
+}
+.slide-editable.rt-list .ProseMirror p[data-indent="1"] {
+  margin-left: 1.4em;
+}
+
 /* Per-element frame: the single outline owner, flush to the box (no offset), so
    one border hugs the element in every state.
    - move mode, hovered (.selected): solid selection outline + the 8 handles below

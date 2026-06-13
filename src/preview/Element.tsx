@@ -197,7 +197,14 @@ function renderRuns(runs: Run[]) {
 // One table cell's content: editable when it carries a source, else plain runs.
 function CellContent({ slideId, source, runs, defaultSize }: { slideId: string; source?: string; runs: Run[]; defaultSize: number }) {
   if (!source) return <>{renderRuns(runs)}</>;
-  return <RichTextEditor slideId={slideId} path={source} spans={asSpans(runs)} defaultSize={defaultSize} />;
+  return (
+    <RichTextEditor
+      slideId={slideId}
+      target={{ kind: "field", path: source }}
+      paragraphs={[{ runs: asSpans(runs) }]}
+      defaultSize={defaultSize}
+    />
+  );
 }
 
 function Paragraph({
@@ -245,7 +252,12 @@ function Paragraph({
   // The content slot: editable (rich text) or static runs. Under a bullet it's a
   // flex:1 column so the block editor takes the remaining width and wraps there.
   const content = p.source ? (
-    <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)} defaultSize={p.size ?? defSize} />
+    <RichTextEditor
+      slideId={slideId}
+      target={{ kind: "field", path: p.source }}
+      paragraphs={[{ runs: asSpans(p.runs) }]}
+      defaultSize={p.size ?? defSize}
+    />
   ) : (
     renderRuns(p.runs)
   );
@@ -352,20 +364,49 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
         justifyContent: justify[e.valign ?? "top"],
       }}
     >
-      {e.paragraphs.map((p, i) => (
-        <Paragraph
-          key={i}
-          p={p}
+      {e.list ? (
+        // List element (bullets, cover authors): ONE editor over every paragraph,
+        // so a selection - and any formatting - spans them. Element-level type
+        // styling lives on the host; the bullet markers/indent are CSS (see
+        // .rt-list in styles.css), keyed off each paragraph's data-bullet/-indent.
+        <RichTextEditor
           slideId={slideId}
-          defFont={e.font}
-          defSize={e.size}
-          defColor={e.color}
-          defAlign={e.align}
-          lineHeightPt={e.lineHeightPt}
+          target={{ kind: "list", path: e.list.path, item: e.list.item }}
+          paragraphs={e.paragraphs.map((p) => ({ runs: asSpans(p.runs), bullet: p.bullet, indentLevel: p.indentLevel }))}
+          defaultSize={e.size}
+          style={listHostStyle(e)}
         />
-      ))}
+      ) : (
+        e.paragraphs.map((p, i) => (
+          <Paragraph
+            key={i}
+            p={p}
+            slideId={slideId}
+            defFont={e.font}
+            defSize={e.size}
+            defColor={e.color}
+            defAlign={e.align}
+            lineHeightPt={e.lineHeightPt}
+          />
+        ))
+      )}
     </div>
   );
+}
+
+// Element-level type styling for a list editor host. The block PM paragraphs
+// inherit it; run marks (color, size) override per span, bullet markers inherit
+// the color.
+function listHostStyle(e: Extract<Element, { kind: "text" }>): CSSProperties {
+  return {
+    display: "block",
+    width: "100%",
+    fontFamily: `'${e.font}', sans-serif`,
+    fontSize: e.size * PT_PX,
+    lineHeight: e.lineHeightPt ? `${e.lineHeightPt * PT_PX}px` : 1.3,
+    color: e.color,
+    textAlign: e.align ?? "left",
+  };
 }
 
 // ---------------------------------------------------------------------------

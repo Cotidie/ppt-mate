@@ -1,11 +1,18 @@
-// In-place rich-text editor for a single deck field. The TipTap editor is always
-// mounted, rendering the field's runs; it is editable only in "edit" mode, so a
-// click lands the caret natively where pressed and a drag selects natively - no
-// selection has to be carried across a read->edit DOM swap. Enter (or blur)
-// commits the serialized Span[] to deck.json via /api/slides/edit; Escape
-// reverts to the last committed value.
+// In-place rich-text editor for one whole text element. The TipTap editor is
+// always mounted, rendering the element's paragraph(s); it is editable only in
+// "edit" mode, so a click lands the caret natively where pressed and a drag
+// selects natively - no selection carried across a read->edit DOM swap.
+//
+// Two targets:
+//   - field: one paragraph backing a single deck field (title, note, a cell).
+//     Enter (or blur) commits the serialized Span[] via /api/slides/edit.
+//   - list: many paragraphs (bullets, cover authors) in ONE editor, so a
+//     selection - and any formatting (bold, color, font size) - can span them.
+//     Enter starts a new item; blur commits the whole array as one field write.
+// Escape reverts to the last committed value either way.
 
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import Document from "@tiptap/extension-document";
@@ -21,8 +28,15 @@ import Highlight from "@tiptap/extension-highlight";
 import { HexColorPicker, HexColorInput } from "react-colorful";
 import type { Span } from "../model/deck";
 import { FOOTER_SOURCE } from "../model/deck";
-import { spansToDoc, docToSpans, type PMDoc } from "./richtext";
+import { parasToDoc, docToParas, type EditorPara, type PMDoc } from "./richtext";
 import { useMode } from "./mode";
+
+// Where this editor commits. A list edit rewrites the whole parent array (so a
+// cross-item selection commits atomically): "bullets" items are {runs, level},
+// "lines" items are Span[].
+export type EditTarget =
+  | { kind: "field"; path: string }
+  | { kind: "list"; path: string; item: "bullets" | "lines" };
 
 // Swatch palettes for the bubble's color controls. The first entry (v: null) is
 // the reset: Default removes the text color, None removes the highlight.
@@ -45,8 +59,33 @@ const HIGHLIGHT_SWATCHES: Swatch[] = [
   { v: "#E5DBFF", title: "Lavender" },
 ];
 
-// Single-paragraph schema: no hard breaks, so Enter is free to commit.
-const OneLineDocument = Document.extend({ content: "paragraph" });
+// Paragraph carrying the bullet flag + indent level as attributes, rendered to
+// data-* so CSS can draw the marker/indent (the marker is not part of the text,
+// so a selection sweeps only the editable runs). keepOnSplit so a new bullet
+// made with Enter inherits them.
+const RichParagraph = Paragraph.extend({
+  addAttributes() {
+    return {
+      bullet: {
+        default: false,
+        keepOnSplit: true,
+        parseHTML: (el) => el.getAttribute("data-bullet") === "true",
+        renderHTML: (attrs) => (attrs.bullet ? { "data-bullet": "true" } : {}),
+      },
+      indentLevel: {
+        default: 0,
+        keepOnSplit: true,
+        parseHTML: (el) => Number(el.getAttribute("data-indent")) || 0,
+        renderHTML: (attrs) => (attrs.indentLevel ? { "data-indent": String(attrs.indentLevel) } : {}),
+      },
+    };
+  },
+});
+
+// One paragraph (field) vs many (list). A single-paragraph schema keeps Enter
+// free to commit; the multi-paragraph one lets Enter split into a new item.
+const OneParaDoc = Document.extend({ content: "paragraph" });
+const MultiParaDoc = Document.extend({ content: "paragraph+" });
 
 const PT_PX = 96 / 72;
 const SIZE_STEP = 2;
@@ -55,17 +94,20 @@ const SIZE_MAX = 160;
 
 export function RichTextEditor({
   slideId,
-  path,
-  spans,
+  target,
+  paragraphs,
   defaultSize = 18,
+  style,
 }: {
   slideId: string;
-  path: string;
-  spans: Span[];
+  target: EditTarget;
+  paragraphs: EditorPara[];
   defaultSize?: number; // pt the field falls back to when a run has no explicit size
+  style?: CSSProperties; // element-level type styling applied to the editor host
 }) {
   const mode = useMode();
   const editable = mode === "edit";
+  const isList = target.kind === "list";
   const [focused, setFocused] = useState(false);
   // Which color picker is open in the bubble ("text" | "highlight" | none).
   const [picker, setPicker] = useState<"text" | "highlight" | null>(null);
@@ -83,17 +125,17 @@ export function RichTextEditor({
   // The last value this editor is in sync with, as a normalized doc-JSON string.
   // Guards both directions: skip a no-op commit, and skip clobbering the editor
   // with an incoming prop that already matches what it shows.
-  const synced = useRef(JSON.stringify(spansToDoc(spans)));
+  const synced = useRef(JSON.stringify(parasToDoc(paragraphs)));
   // True from the moment we commit an edit until the committed value echoes back
-  // through props (server write -> HMR). While awaiting, the `spans` prop still
-  // holds the STALE pre-commit value; without this hold the sync effect would
-  // briefly setContent that stale value and visibly revert the just-made edit.
+  // through props (server write -> HMR). While awaiting, the props still hold the
+  // STALE pre-commit value; without this hold the sync effect would briefly
+  // setContent that stale value and visibly revert the just-made edit.
   const awaitingCommit = useRef(false);
 
   const editor = useEditor({
     extensions: [
-      OneLineDocument,
-      Paragraph,
+      isList ? MultiParaDoc : OneParaDoc,
+      RichParagraph,
       Text,
       Bold,
       Italic,
@@ -103,7 +145,7 @@ export function RichTextEditor({
       Color,
       Highlight.configure({ multicolor: true }),
     ],
-    content: spansToDoc(spans),
+    content: parasToDoc(paragraphs),
     editable,
     onFocus: () => {
       // Re-entering the editor ends any pending commit-hold: the user is the
@@ -148,7 +190,7 @@ export function RichTextEditor({
   // value is authoritative until props catch up, so a lagging stale prop can't
   // revert the edit. Only a prop that differs from `synced` while we are NOT
   // awaiting our own commit is a genuine external change worth applying.
-  const incoming = JSON.stringify(spansToDoc(spans));
+  const incoming = JSON.stringify(parasToDoc(paragraphs));
   useEffect(() => {
     if (!editor || focused) return;
     if (incoming === synced.current) {
@@ -173,15 +215,28 @@ export function RichTextEditor({
 
   function commit() {
     if (!editor) return;
-    const next = docToSpans(editor.getJSON() as unknown as PMDoc);
-    const nextJSON = JSON.stringify(spansToDoc(next));
+    const paras = docToParas(editor.getJSON() as unknown as PMDoc);
+    const nextJSON = JSON.stringify(parasToDoc(paras));
     if (nextJSON === synced.current) return; // unchanged
     synced.current = nextJSON;
     awaitingCommit.current = true; // hold the edit until props echo it back (HMR)
-    // The footer is the deck-wide meta string, not a slide field: flatten the
-    // edited runs to plain text and commit it via its own route.
-    if (path === FOOTER_SOURCE) void commitFooter(next);
-    else void commitSpans(slideId, path, next);
+    if (target.kind === "field") {
+      const spans = paras[0]?.runs ?? [];
+      // The footer is the deck-wide meta string, not a slide field: flatten the
+      // edited runs to plain text and commit it via its own route.
+      if (target.path === FOOTER_SOURCE) void commitFooter(spans);
+      else void commitField(slideId, target.path, spans);
+    } else if (target.item === "lines") {
+      // Each paragraph is one Span[] line; commit the whole array.
+      void commitField(slideId, target.path, paras.map((p) => p.runs));
+    } else {
+      // Bullets: each paragraph is {runs, level?}; commit the whole array.
+      void commitField(
+        slideId,
+        target.path,
+        paras.map((p) => (p.indentLevel ? { runs: p.runs, level: p.indentLevel } : { runs: p.runs })),
+      );
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -189,9 +244,11 @@ export function RichTextEditor({
     // flipping slides while typing (App's nav listener is on window).
     e.stopPropagation();
     if (!editor) return;
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !isList) {
+      // Single-field schema: blur is the commit path. (In a list, Enter falls
+      // through to ProseMirror, which splits into a new item.)
       e.preventDefault();
-      editor.commands.blur(); // single-paragraph schema; blur is the commit path
+      editor.commands.blur();
     } else if (e.key === "Escape") {
       e.preventDefault();
       editor.commands.setContent(JSON.parse(synced.current) as PMDoc, { emitUpdate: false });
@@ -282,8 +339,12 @@ export function RichTextEditor({
   return (
     <span
       className={
-        "slide-editable" + (editable ? " editable" : "") + (focused ? " editing" : "")
+        "slide-editable" +
+        (isList ? " rt-list" : "") +
+        (editable ? " editable" : "") +
+        (focused ? " editing" : "")
       }
+      style={style}
       onKeyDown={onKeyDown}
     >
       {editor && focused && (
@@ -429,7 +490,7 @@ export function RichTextEditor({
   );
 }
 
-async function commitSpans(id: string, path: string, value: Span[]): Promise<void> {
+async function commitField(id: string, path: string, value: unknown): Promise<void> {
   const res = await fetch("/api/slides/edit", {
     method: "POST",
     headers: { "content-type": "application/json" },
