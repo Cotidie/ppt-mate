@@ -11,6 +11,33 @@ body {
   color: #e7eaf0;
 }
 
+/* Modern scrollbars, applied globally. A thin, rounded, semi-transparent thumb
+   that floats inside an invisible track (the transparent border + padding-box
+   clip insets it) and brightens on hover. The slate tint reads on both the dark
+   panels and the light slide canvas. Firefox uses the scrollbar-* properties. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 150, 165, 0.45) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 150, 165, 0.45);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 150, 165, 0.7);
+  background-clip: padding-box;
+}
+
 /* Inline-editable text. No box-shaped outline here (that's the frame's job, see
    .el-frame below); a faint tint marks the field being edited. The text cursor
    shows only in edit mode (.editable), so move mode keeps the frame's grab cursor. */
