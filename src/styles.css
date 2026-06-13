@@ -717,9 +717,50 @@ body.gesture-active * {
   outline: 2px solid #fff;
   outline-offset: 1px;
 }
-/* Reset swatch (Default / None): white with a red diagonal slash. */
-.rt-bubble button.rt-swatch.reset {
-  background:
-    linear-gradient(to top right, transparent 44%, #e5484d 44%, #e5484d 56%, transparent 56%),
-    #fff;
+/* react-colorful picker popover inside the bubble. */
+.rt-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 1px;
+  width: 168px;
+}
+.rt-picker .react-colorful {
+  width: 168px;
+  height: 132px;
+}
+.rt-picker .react-colorful__saturation {
+  border-radius: 5px 5px 0 0;
+}
+.rt-picker .react-colorful__hue {
+  height: 14px;
+  border-radius: 0 0 5px 5px;
+}
+.rt-picker-row {
+  display: flex;
+  gap: 6px;
+}
+.rt-hex {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  background: #11182b;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 4px 6px;
+  text-transform: uppercase;
+}
+.rt-bubble button.rt-reset-btn {
+  min-width: 0;
+  width: auto;
+  height: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.rt-bubble button.rt-reset-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
 }

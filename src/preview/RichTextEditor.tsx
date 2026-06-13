@@ -17,6 +17,7 @@ import Underline from "@tiptap/extension-underline";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
+import { HexColorPicker, HexColorInput } from "react-colorful";
 import type { Span } from "../model/deck";
 import { FOOTER_SOURCE } from "../model/deck";
 import { spansToDoc, docToSpans, type PMDoc } from "./richtext";
@@ -58,8 +59,16 @@ export function RichTextEditor({
   const mode = useMode();
   const editable = mode === "edit";
   const [focused, setFocused] = useState(false);
-  // Which color palette is open in the bubble ("text" | "highlight" | none).
+  // Which color picker is open in the bubble ("text" | "highlight" | none).
   const [picker, setPicker] = useState<"text" | "highlight" | null>(null);
+  // The hex the picker UI currently shows (controlled value for react-colorful).
+  const [draft, setDraft] = useState("#000000");
+  // Synchronous mirror of `picker` for the onBlur guard, the selection to apply
+  // colors to (the picker steals DOM focus, so we operate on a saved range), and
+  // a ref to the bubble for outside-click detection.
+  const pickerOpenRef = useRef(false);
+  const savedSel = useRef<{ from: number; to: number } | null>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
   // The last value this editor is in sync with, as a normalized doc-JSON string.
   // Guards both directions: skip a no-op commit, and skip clobbering the editor
@@ -82,6 +91,9 @@ export function RichTextEditor({
     editable,
     onFocus: () => setFocused(true),
     onBlur: () => {
+      // While a color picker is open it owns focus; ignore this blur so the
+      // bubble stays mounted and we don't commit mid-interaction.
+      if (pickerOpenRef.current) return;
       setFocused(false);
       setPicker(null);
       commit();
@@ -104,6 +116,17 @@ export function RichTextEditor({
     editor.commands.setContent(JSON.parse(incoming) as PMDoc, { emitUpdate: false });
     synced.current = incoming;
   }, [editor, incoming, focused]);
+
+  // A mousedown outside the bubble while a picker is open means the user is done:
+  // close it and commit (the onBlur guard suppresses the normal commit path).
+  useEffect(() => {
+    if (!picker) return;
+    const onDown = (e: MouseEvent) => {
+      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) finishPicker();
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, [picker]);
 
   function commit() {
     if (!editor) return;
@@ -132,6 +155,58 @@ export function RichTextEditor({
     }
   }
 
+  // --- Color pickers -------------------------------------------------------
+  // The picker UI lives outside the editor and steals DOM focus, so we snapshot
+  // the selection on open and apply colors to that saved range (no .focus()).
+
+  function openPicker(kind: "text" | "highlight") {
+    if (!editor) return;
+    if (picker === kind) return closePicker(); // toggle off
+    const { from, to } = editor.state.selection;
+    savedSel.current = { from, to };
+    const cur = (kind === "text"
+      ? editor.getAttributes("textStyle").color
+      : editor.getAttributes("highlight").color) as string | undefined;
+    setDraft(cur ?? (kind === "text" ? "#1A1A2E" : "#FFE08A"));
+    pickerOpenRef.current = true;
+    setPicker(kind);
+  }
+
+  function applyHex(hex: string) {
+    setDraft(hex);
+    const s = savedSel.current;
+    if (!editor || !s) return;
+    const chain = editor.chain().setTextSelection(s);
+    if (picker === "highlight") chain.setHighlight({ color: hex }).run();
+    else chain.setColor(hex).run();
+  }
+
+  function resetCurrent() {
+    const s = savedSel.current;
+    if (editor && s) {
+      const chain = editor.chain().setTextSelection(s);
+      if (picker === "highlight") chain.unsetHighlight().run();
+      else chain.unsetColor().run();
+    }
+    closePicker();
+  }
+
+  // Close from inside the bubble: keep editing (refocus the saved range).
+  function closePicker() {
+    pickerOpenRef.current = false;
+    setPicker(null);
+    const s = savedSel.current;
+    if (editor && s) editor.chain().setTextSelection(s).focus().run();
+  }
+
+  // Close because the user clicked outside the bubble: finish editing + commit.
+  function finishPicker() {
+    pickerOpenRef.current = false;
+    setPicker(null);
+    setFocused(false);
+    commit();
+  }
+
   return (
     <span
       className={
@@ -140,85 +215,101 @@ export function RichTextEditor({
       onKeyDown={onKeyDown}
     >
       {editor && focused && (
-        <BubbleMenu editor={editor} className="rt-bubble">
-          <div className="rt-row">
-            <button
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => editor.chain().focus().toggleBold().run()}
-              className={editor.isActive("bold") ? "on" : ""}
-              title="Bold"
-            >
-              <b>B</b>
-            </button>
-            <button
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-              className={editor.isActive("italic") ? "on" : ""}
-              title="Italic"
-            >
-              <i>I</i>
-            </button>
-            <button
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => editor.chain().focus().toggleUnderline().run()}
-              className={editor.isActive("underline") ? "on" : ""}
-              title="Underline"
-            >
-              <u>U</u>
-            </button>
-            <span className="rt-sep" />
-            <button
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setPicker((p) => (p === "text" ? null : "text"))}
-              className={picker === "text" ? "on" : ""}
-              title="Font color"
-            >
-              <span
-                className="rt-glyph"
-                style={{ borderBottom: `3px solid ${editor.getAttributes("textStyle").color ?? "transparent"}` }}
+        <BubbleMenu
+          editor={editor}
+          className="rt-bubble"
+          shouldShow={({ editor: ed }) =>
+            pickerOpenRef.current || (ed.isFocused && !ed.state.selection.empty)
+          }
+        >
+          <div ref={bubbleRef} style={{ display: "contents" }}>
+            <div className="rt-row">
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editor.chain().focus().toggleBold().run()}
+                className={editor.isActive("bold") ? "on" : ""}
+                title="Bold"
               >
-                A
-              </span>
-            </button>
-            <button
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setPicker((p) => (p === "highlight" ? null : "highlight"))}
-              className={picker === "highlight" ? "on" : ""}
-              title="Highlight color"
-            >
-              <span
-                className="rt-glyph"
-                style={{ borderBottom: `3px solid ${editor.getAttributes("highlight").color ?? "transparent"}` }}
+                <b>B</b>
+              </button>
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editor.chain().focus().toggleItalic().run()}
+                className={editor.isActive("italic") ? "on" : ""}
+                title="Italic"
               >
-                H
-              </span>
-            </button>
-          </div>
-          {picker && (
-            <div className="rt-swatches">
-              {(picker === "text" ? TEXT_SWATCHES : HIGHLIGHT_SWATCHES).map((s) => {
-                const current =
-                  picker === "text"
-                    ? (editor.getAttributes("textStyle").color ?? null)
-                    : (editor.getAttributes("highlight").color ?? null);
-                return (
-                  <button
-                    key={s.v ?? "reset"}
-                    className={"rt-swatch" + (s.v === null ? " reset" : "") + (current === s.v ? " sel" : "")}
-                    style={s.v ? { background: s.v } : undefined}
-                    title={s.title}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      const c = editor.chain().focus();
-                      if (picker === "text") s.v ? c.setColor(s.v).run() : c.unsetColor().run();
-                      else s.v ? c.setHighlight({ color: s.v }).run() : c.unsetHighlight().run();
-                      setPicker(null);
-                    }}
-                  />
-                );
-              })}
+                <i>I</i>
+              </button>
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editor.chain().focus().toggleUnderline().run()}
+                className={editor.isActive("underline") ? "on" : ""}
+                title="Underline"
+              >
+                <u>U</u>
+              </button>
+              <span className="rt-sep" />
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => openPicker("text")}
+                className={picker === "text" ? "on" : ""}
+                title="Font color"
+              >
+                <span
+                  className="rt-glyph"
+                  style={{ borderBottom: `3px solid ${editor.getAttributes("textStyle").color ?? "transparent"}` }}
+                >
+                  A
+                </span>
+              </button>
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => openPicker("highlight")}
+                className={picker === "highlight" ? "on" : ""}
+                title="Highlight color"
+              >
+                <span
+                  className="rt-glyph"
+                  style={{ borderBottom: `3px solid ${editor.getAttributes("highlight").color ?? "transparent"}` }}
+                >
+                  H
+                </span>
+              </button>
             </div>
-          )}
+            {picker && (
+              <div className="rt-picker">
+                <HexColorPicker color={draft} onChange={applyHex} />
+                <div className="rt-picker-row">
+                  {/* HexColorInput onChange yields the hex without '#'. */}
+                  <HexColorInput className="rt-hex" color={draft} prefixed onChange={(h) => applyHex("#" + h)} />
+                  <button
+                    className="rt-reset-btn"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={resetCurrent}
+                  >
+                    {picker === "text" ? "Default" : "None"}
+                  </button>
+                </div>
+                <div className="rt-swatches">
+                  {(picker === "text" ? TEXT_SWATCHES : HIGHLIGHT_SWATCHES)
+                    .filter((s) => s.v)
+                    .map((s) => (
+                      <button
+                        key={s.v}
+                        className="rt-swatch"
+                        style={{ background: s.v as string }}
+                        title={s.title}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          applyHex(s.v as string);
+                          closePicker();
+                        }}
+                      />
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
         </BubbleMenu>
       )}
       <EditorContent editor={editor} />
