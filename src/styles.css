@@ -36,12 +36,18 @@ body {
 }
 
 /* While editing, lift the whole slide element above siblings painted later in
-   DOM order (e.g. the closing rule/footer), and stop clipping it: text elements
-   set overflow:hidden inline, which would clip the floating BubbleMenu where it
-   extends past the element's box (revealing the rule/background behind it).
-   Stage children are already position:absolute. */
+   DOM order (e.g. the closing rule/footer) so the floating BubbleMenu isn't
+   covered. Stage children are already position:absolute. */
 .stage > *:has(.slide-editable.editing) {
   z-index: 5;
+}
+
+/* Stop clipping the editable element on hover/edit: text elements set
+   overflow:hidden inline, which crops the hover/edit outline on the top-left
+   (where the editable sits flush with the element box) and the floating
+   BubbleMenu when editing. */
+.stage > *:has(.slide-editable:hover),
+.stage > *:has(.slide-editable.editing) {
   overflow: visible !important;
 }
 
