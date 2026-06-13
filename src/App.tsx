@@ -27,6 +27,8 @@ export default function App() {
   const [mode, setMode] = useState<Mode>("edit");
   const [zoom, setZoom] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const slides = deck.slides;
   const clamp = (n: number) => Math.max(0, Math.min(slides.length - 1, n));
 
@@ -34,6 +36,16 @@ export default function App() {
     setZoom((z) =>
       a === "fit" ? 1 : Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + (a === "in" ? ZOOM_STEP : -ZOOM_STEP)))
     );
+
+  const onExport = async (format: "pdf" | "pptx") => {
+    setExporting(true);
+    try {
+      await exportDeck(format);
+      setExportOpen(false);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const startRename = (s: Deck["slides"][number]) => {
     setEditingId(s.id);
@@ -124,6 +136,10 @@ export default function App() {
               onMode={setMode}
               onZoom={onZoom}
               onResetPosition={() => resetLayout(slides[i].id)}
+              exportOpen={exportOpen}
+              onToggleExport={() => setExportOpen((o) => !o)}
+              onExport={onExport}
+              exporting={exporting}
               settingsOpen={settingsOpen}
               onToggleSettings={() => setSettingsOpen((o) => !o)}
             />
@@ -199,6 +215,26 @@ async function renameSlide(id: string, label: string): Promise<void> {
     body: JSON.stringify({ id, label }),
   });
   if (!res.ok) alert("Rename failed. Is the dev server running?");
+}
+
+// Exports the deck via the dev server (rebuilds the pptx from current deck.json;
+// PDF goes through headless LibreOffice). Streams the file back; we trigger a
+// browser download from the blob.
+async function exportDeck(format: "pdf" | "pptx"): Promise<void> {
+  const res = await fetch(`/api/export?format=${format}`);
+  if (!res.ok) {
+    alert("Export failed. Is the dev server running?");
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `deck.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Clears all element geometry overrides on a slide (undo moves + resizes). The

@@ -7,23 +7,31 @@ import type { Plugin, Connect } from "vite";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
+const OUT_DIR = resolve(HERE, "out");
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
+
+// Captured so the export route can load the TypeScript exporter through Vite's
+// transform pipeline (ssrLoadModule) - plain Node can't import the .mts/.ts directly.
+let devServer: import("vite").ViteDevServer | null = null;
 
 export function deckApi(): Plugin {
   return {
     name: "deck-api",
     configureServer(server) {
+      devServer = server;
       server.middlewares.use("/api/slides/delete", handleDeleteSlide);
       server.middlewares.use("/api/slides/rename", handleRenameSlide);
       server.middlewares.use("/api/slides/edit", handleEditSlide);
       server.middlewares.use("/api/slides/move", handleMoveSlide);
       server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
+      server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/chat/reset", handleChatReset);
       server.middlewares.use("/api/chat", handleChat);
       bindShutdown(server.httpServer);
@@ -333,6 +341,74 @@ async function resetSlideOverrides(id: string): Promise<void> {
   if (!slide || !slide.overrides) return;
   delete slide.overrides;
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
+}
+
+// Export the deck from the UI. Always rebuild out/deck.pptx from the CURRENT
+// deck.json (the pptx mirrors the preview by construction); for PDF, convert that
+// pptx with headless LibreOffice (soffice) so the PDF matches by construction too.
+// Streams the file back as a download. PDF fidelity depends on the deck's fonts
+// being available to LibreOffice (missing fonts get substituted).
+let exporting: Promise<void> | null = null; // serialize: one export at a time
+
+async function handleExport(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "GET") return next();
+  const format = new URL(req.url ?? "", "http://localhost").searchParams.get("format") === "pptx"
+    ? "pptx"
+    : "pdf";
+  // Chain onto any in-flight export so concurrent clicks don't race soffice.
+  const run = (exporting ?? Promise.resolve()).then(() => streamExport(res, format));
+  exporting = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  try {
+    await run;
+  } catch (err) {
+    if (!res.headersSent) sendJson(res, 500, { error: String(err) });
+  }
+}
+
+async function streamExport(res: ServerResponse, format: "pdf" | "pptx"): Promise<void> {
+  if (!devServer) throw new Error("dev server not ready");
+  // ssrLoadModule transforms the exporter + its src/ TS imports through Vite.
+  const mod = (await devServer.ssrLoadModule("/export/export-pptx.mts")) as {
+    buildPptx: () => Promise<string>;
+  };
+  const pptxPath = await mod.buildPptx();
+  const path = format === "pptx" ? pptxPath : await pptxToPdf(pptxPath);
+  const body = await readFile(path);
+  res.statusCode = 200;
+  res.setHeader(
+    "content-type",
+    format === "pptx"
+      ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      : "application/pdf",
+  );
+  res.setHeader("content-disposition", `attachment; filename="deck.${format}"`);
+  res.end(body);
+}
+
+function pptxToPdf(pptxPath: string): Promise<string> {
+  return new Promise((resolveP, reject) => {
+    const child = spawn(
+      "soffice",
+      [
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        OUT_DIR,
+        pptxPath,
+        // Isolated profile so we don't collide with a running LibreOffice instance.
+        "-env:UserInstallation=file:///tmp/ppt-mate-lo",
+      ],
+      { stdio: "ignore" },
+    );
+    child.on("error", reject);
+    child.on("exit", (code) =>
+      code === 0 ? resolveP(resolve(OUT_DIR, "deck.pdf")) : reject(new Error(`soffice exited ${code}`)),
+    );
+  });
 }
 
 // The footer is deck-wide (deck.meta.footer), shown on every slide. Editing it

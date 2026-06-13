@@ -13,7 +13,6 @@ import { theme } from "../src/theme/theme";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = pathResolve(here, "..");
-const deck = JSON.parse(readFileSync(pathResolve(root, "deck.json"), "utf8")) as Deck;
 
 const hex = (c?: string) => (c ?? "#000000").replace("#", "").toUpperCase();
 
@@ -135,7 +134,10 @@ function addTableEl(slide: pptxgen.Slide, e: Extract<Element, { kind: "table" }>
   });
 }
 
-async function main() {
+// Builds out/deck.pptx from the CURRENT deck.json (re-read each call, so the dev
+// server's export route always reflects live edits) and returns the file path.
+export async function buildPptx(): Promise<string> {
+  const deck = JSON.parse(readFileSync(pathResolve(root, "deck.json"), "utf8")) as Deck;
   const pptx = new pptxgen();
   pptx.defineLayout({ name: "W16x9", width: theme.canvas.w, height: theme.canvas.h });
   pptx.layout = "W16x9";
@@ -155,10 +157,15 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
   const fileName = pathResolve(outDir, "deck.pptx");
   await pptx.writeFile({ fileName });
-  console.log("wrote", fileName);
+  return fileName;
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// CLI entry: `npm run export`. Importers (the dev server) call buildPptx directly.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  buildPptx()
+    .then((p) => console.log("wrote", p))
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+}

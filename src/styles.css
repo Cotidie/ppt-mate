@@ -398,6 +398,50 @@ body.gesture-active * {
   color: #9aa3b2;
 }
 
+/* Export menu: same floating-card look as the settings panel, but a list of
+   format choices anchored to the export button. */
+.export-menu {
+  position: absolute;
+  right: calc(100% + 10px);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(20, 23, 30, 0.96);
+  border: 1px solid #353b48;
+  border-radius: 10px;
+  padding: 6px;
+}
+.export-menu button {
+  text-align: left;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #e7eaf0;
+  font-size: 13px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.export-menu button:hover {
+  background: #2a3550;
+}
+.export-menu button:disabled {
+  color: #6b7280;
+  cursor: default;
+}
+
+/* Slow spin for the export busy icon. */
+.toolbox-btn svg.spin,
+.toolbox-btn .spin {
+  animation: tb-spin 0.8s linear infinite;
+}
+@keyframes tb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Bottom-docked chat with the local Claude Code CLI. Height is drag-set inline
    (see ChatDock); the log flexes to fill whatever remains. */
 .chat-dock {
