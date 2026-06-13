@@ -72,6 +72,31 @@ body {
   outline: none;
 }
 
+/* Per-element frame: geometry owner (move/resize). In move mode, hovering shows
+   a selection outline and the 8 resize handles below. */
+.el-frame.selected {
+  outline: 1px solid rgba(59, 111, 212, 0.9);
+}
+
+.resize-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  border: 1px solid #3b6fd4;
+  border-radius: 2px;
+  z-index: 6;
+}
+/* Edge handles centered on each side; corner handles pinned to the corners. */
+.rh-n  { top: -5px;    left: 50%;     transform: translateX(-50%); cursor: ns-resize; }
+.rh-s  { bottom: -5px; left: 50%;     transform: translateX(-50%); cursor: ns-resize; }
+.rh-e  { right: -5px;  top: 50%;      transform: translateY(-50%); cursor: ew-resize; }
+.rh-w  { left: -5px;   top: 50%;      transform: translateY(-50%); cursor: ew-resize; }
+.rh-ne { top: -5px;    right: -5px;   cursor: nesw-resize; }
+.rh-nw { top: -5px;    left: -5px;    cursor: nwse-resize; }
+.rh-se { bottom: -5px; right: -5px;   cursor: nwse-resize; }
+.rh-sw { bottom: -5px; left: -5px;    cursor: nesw-resize; }
+
 .app {
   display: grid;
   /* minmax(0, 1fr): without the 0-min, the track's min-content is the 1280px

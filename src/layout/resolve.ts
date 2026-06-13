@@ -12,15 +12,26 @@ import { resolveClosing } from "./families/closing";
 
 export type { Element } from "./element";
 
+// Smallest an element may be shrunk to via a resize drag (inches), so a handle
+// can't collapse or invert a box. Shared with the preview's live-resize clamp.
+export const MIN_IN = 0.3;
+
 export function resolveSlide(slide: Slide, theme: Theme, footerText: string): Element[] {
   const els = resolveByLayout(slide, theme, footerText);
-  const offsets = slide.offsets;
-  if (!offsets) return els;
-  // Apply user drag offsets (inches) once, here, so the preview and the PPTX
-  // exporter (both call resolveSlide) honor moves identically.
+  const overrides = slide.overrides;
+  if (!overrides) return els;
+  // Apply user geometry overrides (inches) once, here, so the preview and the
+  // PPTX exporter (both call resolveSlide) honor moves and resizes identically.
   return els.map((el) => {
-    const o = offsets[el.key];
-    return o ? { ...el, x: el.x + o.dx, y: el.y + o.dy } : el;
+    const o = overrides[el.key];
+    if (!o) return el;
+    return {
+      ...el,
+      x: el.x + (o.dx ?? 0),
+      y: el.y + (o.dy ?? 0),
+      w: Math.max(MIN_IN, el.w + (o.dw ?? 0)),
+      h: Math.max(MIN_IN, el.h + (o.dh ?? 0)),
+    };
   });
 }
 

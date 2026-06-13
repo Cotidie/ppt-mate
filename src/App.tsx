@@ -123,7 +123,7 @@ export default function App() {
               mode={mode}
               onMode={setMode}
               onZoom={onZoom}
-              onResetPosition={() => resetPosition(slides[i].id)}
+              onResetPosition={() => resetLayout(slides[i].id)}
               settingsOpen={settingsOpen}
               onToggleSettings={() => setSettingsOpen((o) => !o)}
             />
@@ -201,10 +201,10 @@ async function renameSlide(id: string, label: string): Promise<void> {
   if (!res.ok) alert("Rename failed. Is the dev server running?");
 }
 
-// Clears all element position offsets on a slide (undo drags). The file write
-// triggers Vite HMR, which reloads the preview with elements back at their
-// computed positions.
-async function resetPosition(id: string): Promise<void> {
+// Clears all element geometry overrides on a slide (undo moves + resizes). The
+// file write triggers Vite HMR, which reloads the preview with elements back at
+// their computed position and size.
+async function resetLayout(id: string): Promise<void> {
   const res = await fetch("/api/slides/reset-offsets", {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -33,7 +33,7 @@ export function Toolbox({
 
       <div className="toolbox-divider" />
 
-      <ToolButton label="Reset position" onClick={onResetPosition}>
+      <ToolButton label="Reset layout" onClick={onResetPosition}>
         <ResetIcon />
       </ToolButton>
 

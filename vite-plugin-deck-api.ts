@@ -273,50 +273,65 @@ function setByPath(root: any, path: string, value: unknown): void {
   if (node != null && leaf in node) node[leaf] = value;
 }
 
-// Drag-to-move: accumulate a per-element position offset (inches) on the slide.
-// setByPath can't create the `offsets` map, so this has its own route. The client
-// sends an incremental delta; we add it to any prior offset so repeated drags
-// compose. Key is the resolver's stable element key (e.g. "title", "table").
+// Drag-to-move / drag-to-resize: accumulate a per-element geometry override
+// (inches) on the slide. setByPath can't create the `overrides` map, so this has
+// its own route. The client sends incremental deltas (dx/dy shift, dw/dh resize);
+// we add them to any prior override so repeated gestures compose. Key is the
+// resolver's stable element key (e.g. "title", "table"). Body-move sends dw/dh=0.
 async function handleMoveSlide(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
-    const { id, key, dx, dy } = await readJsonBody(req);
-    await moveSlideElement(id, key, Number(dx), Number(dy));
+    const { id, key, dx, dy, dw, dh } = await readJsonBody(req);
+    await transformSlideElement(id, key, {
+      dx: Number(dx) || 0,
+      dy: Number(dy) || 0,
+      dw: Number(dw) || 0,
+      dh: Number(dh) || 0,
+    });
     sendJson(res, 200, { ok: true });
   } catch (err) {
     sendJson(res, 500, { error: String(err) });
   }
 }
 
-async function moveSlideElement(id: string, key: string, dx: number, dy: number): Promise<void> {
-  if (!key || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
+type Delta = { dx: number; dy: number; dw: number; dh: number };
+
+async function transformSlideElement(id: string, key: string, d: Delta): Promise<void> {
+  if (!key || ![d.dx, d.dy, d.dw, d.dh].every(Number.isFinite)) return;
   const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
   const slide = deck.slides.find((s: { id: string }) => s.id === id);
   if (!slide) return;
-  slide.offsets ??= {};
-  const prev = slide.offsets[key] ?? { dx: 0, dy: 0 };
-  slide.offsets[key] = { dx: prev.dx + dx, dy: prev.dy + dy };
+  slide.overrides ??= {};
+  const prev = slide.overrides[key] ?? {};
+  const next = {
+    dx: (prev.dx ?? 0) + d.dx,
+    dy: (prev.dy ?? 0) + d.dy,
+    dw: (prev.dw ?? 0) + d.dw,
+    dh: (prev.dh ?? 0) + d.dh,
+  };
+  // Keep the stored override sparse: drop axes that net to zero.
+  slide.overrides[key] = Object.fromEntries(Object.entries(next).filter(([, v]) => v !== 0));
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
 }
 
-// Reset position: drop all element offsets on a slide so elements return to
-// their computed positions. The whole `offsets` map is removed (per-slide undo).
+// Reset layout: drop all element overrides on a slide so elements return to their
+// computed position and size. The whole `overrides` map is removed (per-slide undo).
 async function handleResetOffsets(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
     const { id } = await readJsonBody(req);
-    await resetSlideOffsets(id);
+    await resetSlideOverrides(id);
     sendJson(res, 200, { ok: true });
   } catch (err) {
     sendJson(res, 500, { error: String(err) });
   }
 }
 
-async function resetSlideOffsets(id: string): Promise<void> {
+async function resetSlideOverrides(id: string): Promise<void> {
   const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
   const slide = deck.slides.find((s: { id: string }) => s.id === id);
-  if (!slide || !slide.offsets) return;
-  delete slide.offsets;
+  if (!slide || !slide.overrides) return;
+  delete slide.overrides;
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
 }
 
