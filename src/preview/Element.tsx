@@ -251,6 +251,9 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
           border: e.line ? `${(e.lineWidthPt ?? 1) * PT_PX}px solid ${e.line}` : undefined,
           borderRadius: e.radius ? inPx(e.radius) : undefined,
           boxSizing: "border-box",
+          // Clip content to the box here (not on the frame, which must stay
+          // overflow:visible so it doesn't cut the resize handles).
+          overflow: "hidden",
         }}
       />
     );
@@ -270,6 +273,9 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
           fontFamily: `'${e.font}', sans-serif`,
           fontSize: fs,
           tableLayout: "fixed",
+          // Clip to the box on the content (the frame stays overflow:visible so it
+          // doesn't cut the resize handles).
+          overflow: "hidden",
         }}
       >
         <thead>
@@ -438,9 +444,10 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
     ...(isText
       ? { minHeight: inPx(h), display: "flex", flexDirection: "column" }
       : { height: inPx(h) }),
-    // Non-text content clips to its box; text overflows so auto-grow shows, and
-    // so the editor's floating BubbleMenu isn't cropped.
-    overflow: isText ? "visible" : "hidden",
+    // The frame never clips: clipping here would cut the resize handles, which
+    // sit ~5px outside the box. Non-text kinds clip their own content (see
+    // ElementBody); text overflows so auto-grow + the floating BubbleMenu show.
+    overflow: "visible",
     cursor: mode === "move" ? (dragging ? "grabbing" : "grab") : "default",
     touchAction: "none",
     // Move mode is gesture-only; never let a drag highlight text.
