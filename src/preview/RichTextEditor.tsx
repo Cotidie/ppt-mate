@@ -28,10 +28,11 @@ const OneLineDocument = Document.extend({ content: "paragraph" });
 
 type CharRange = { from: number; to: number };
 
-// The character offsets of the live selection within `root`, or null when the
-// selection is collapsed or escapes the element. Used to carry a drag-selected
-// range from the read-mode span across the swap into the editor, so a click that
-// finishes a text selection keeps that selection instead of collapsing.
+// The character offsets of the live selection within `root`, or null when there
+// is no selection or it escapes the element. Carries the read-mode selection
+// across the swap into the editor: a drag-select keeps its range, and a plain
+// click keeps its caret (a collapsed selection, from === to) at the click point
+// instead of jumping to the end.
 function selectionOffsets(root: HTMLElement): CharRange | null {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return null;
@@ -43,7 +44,7 @@ function selectionOffsets(root: HTMLElement): CharRange | null {
   const from = pre.toString().length;
   pre.setEnd(range.endContainer, range.endOffset);
   const to = pre.toString().length;
-  return to > from ? { from, to } : null;
+  return { from, to };
 }
 
 export function RichTextEditor({
@@ -59,8 +60,9 @@ export function RichTextEditor({
 }) {
   const mode = useMode();
   const [editing, setEditing] = useState(false);
-  // A drag-selected range in the read-mode span, carried into the editor so a
-  // click that finishes a selection keeps it instead of collapsing to the end.
+  // The read-mode selection (a drag range, or a click's collapsed caret),
+  // carried into the editor so the cursor lands exactly where clicked instead
+  // of jumping to the end.
   const initialSel = useRef<CharRange | null>(null);
 
   if (!editing) {
@@ -125,8 +127,8 @@ function EditorInstance({
       Highlight.configure({ multicolor: true }),
     ],
     content: spansToDoc(spans),
-    // When a drag selected a range, restore it in onCreate; otherwise drop the
-    // caret at the end.
+    // Restore the carried read-mode selection/caret in onCreate; only fall back
+    // to the end when there was none (e.g. focus entered without a click).
     autofocus: initialSel ? false : "end",
     onCreate({ editor }) {
       if (!initialSel) return;
