@@ -30,6 +30,14 @@ body {
   background: rgba(59, 111, 212, 0.08);
 }
 
+/* While editing, lift the whole slide element above siblings painted later in
+   DOM order (e.g. the closing rule/footer). Without this, those siblings cover
+   the floating BubbleMenu, since the menu's own z-index only ranks it within
+   this element's box. Stage children are already position:absolute. */
+.stage > *:has(.slide-editable.editing) {
+  z-index: 5;
+}
+
 /* TipTap's ProseMirror wraps text in a block <p> that carries the UA-default
    margin: 1em 0 (40px at the title font). Read mode renders runs inline with no
    such margin, so without this the text jumps down on entering edit mode. Zero

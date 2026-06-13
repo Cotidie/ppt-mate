@@ -434,7 +434,13 @@
           "text": "For listening and paying attention"
         }
       ],
-      "navLabel": "last"
+      "navLabel": "last",
+      "offsets": {
+        "footer": {
+          "dx": 0.06207594591917591,
+          "dy": -0.02869329437400947
+        }
+      }
     }
   ]
 }
