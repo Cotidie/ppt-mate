@@ -4,6 +4,7 @@ import type { Deck } from "./model/deck";
 import { SlideCanvas } from "./preview/SlideCanvas";
 import { ChatDock } from "./preview/ChatDock";
 import { Toolbox, type ZoomAction } from "./preview/Toolbox";
+import { Settings } from "./preview/Settings";
 import { ModeContext, type Mode } from "./preview/mode";
 import deckJson from "../deck.json";
 
@@ -26,7 +27,10 @@ export default function App() {
   const railWidth = useRailWidth();
   const [mode, setMode] = useState<Mode>("edit");
   const [zoom, setZoom] = useState(1);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Persisted so the modal survives the HMR full-page reload a theme edit triggers.
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(
+    () => localStorage.getItem("ppt.settingsOpen") === "1"
+  );
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const slides = deck.slides;
@@ -60,6 +64,10 @@ export default function App() {
     if (draft.trim() === labelOf(s)) return; // unchanged
     await renameSlide(s.id, draft);
   };
+
+  useEffect(() => {
+    localStorage.setItem("ppt.settingsOpen", settingsOpen ? "1" : "0");
+  }, [settingsOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -158,6 +166,8 @@ export default function App() {
         </ModeContext.Provider>
         <ChatDock />
       </main>
+
+      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

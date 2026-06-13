@@ -14,6 +14,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
+const THEME_PATH = resolve(HERE, "theme.json");
 const OUT_DIR = resolve(HERE, "out");
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
@@ -35,6 +36,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/move", handleMoveSlide);
       server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
+      server.middlewares.use("/api/theme/edit", handleEditTheme);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
       server.middlewares.use("/api/usage", handleUsage);
@@ -567,6 +569,23 @@ async function editFooter(value: string): Promise<void> {
   deck.meta ??= {};
   deck.meta.footer = value;
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
+}
+
+async function handleEditTheme(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { path, value } = await readJsonBody(req);
+    await editThemeField(String(path), value);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+async function editThemeField(path: string, value: unknown): Promise<void> {
+  const theme = JSON.parse(await readFile(THEME_PATH, "utf8"));
+  setByPath(theme, path, value);
+  await writeFile(THEME_PATH, JSON.stringify(theme, null, 2) + "\n", "utf8");
 }
 
 async function deleteSlideById(id: string): Promise<void> {
