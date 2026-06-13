@@ -6,21 +6,22 @@ import type { Align, Element, Para, Run, VAlign } from "../layout/element";
 import type { Span } from "../model/deck";
 import { PX_PER_IN } from "../theme/theme";
 import { RichTextEditor } from "./RichTextEditor";
+import { useMode } from "./mode";
 
 const PT_PX = 96 / 72;
 const inPx = (v: number) => v * PX_PER_IN;
 const DRAG_THRESHOLD = 3; // px (screen space) before a press becomes a move
 
 // Drag-to-move: presses on the element pan it, committing an inch-offset to
-// deck.json on release. Bails on editing text so TipTap keeps the pointer, and
-// only moves past a small threshold so clicks / double-click-to-edit survive.
+// deck.json on release. Active only in "move" mode; only moves past a small
+// threshold so a click doesn't register as a drag.
 function useElementDrag(slideId: string, elKey: string, scale: number) {
+  const mode = useMode();
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
   const start = useRef<{ x: number; y: number; moved: boolean } | null>(null);
 
   function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest(".slide-editable.editing")) return;
+    if (e.button !== 0 || mode !== "move") return;
     // No pointer capture here: capturing would retarget click/dblclick away from
     // the text span and break double-click-to-edit. Capture only once a real
     // drag begins (see onPointerMove).
@@ -62,9 +63,9 @@ function useElementDrag(slideId: string, elKey: string, scale: number) {
   }
 
   // The translate lives inside the already-scaled stage, so divide by scale to
-  // track the cursor 1:1.
+  // track the cursor 1:1. Grab cursor only in move mode.
   const dragStyle: CSSProperties = {
-    cursor: drag ? "grabbing" : "grab",
+    cursor: mode === "move" ? (drag ? "grabbing" : "grab") : "default",
     touchAction: "none",
     ...(drag ? { transform: `translate(${drag.dx / scale}px, ${drag.dy / scale}px)` } : null),
   };

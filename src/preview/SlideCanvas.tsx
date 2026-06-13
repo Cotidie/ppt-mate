@@ -9,21 +9,33 @@ import { ElementView } from "./Element";
 const STAGE_W = theme.canvas.w * PX_PER_IN; // 1280
 const STAGE_H = theme.canvas.h * PX_PER_IN; // 720
 
-export function SlideCanvas({ slide, footerText }: { slide: Slide; footerText: string }) {
+export function SlideCanvas({
+  slide,
+  footerText,
+  zoom = 1,
+}: {
+  slide: Slide;
+  footerText: string;
+  zoom?: number;
+}) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
 
   useEffect(() => {
     const fit = () => {
       const el = wrapRef.current;
       if (!el) return;
       const s = Math.min(el.clientWidth / STAGE_W, el.clientHeight / STAGE_H);
-      setScale(s);
+      setFitScale(s);
     };
     fit();
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
+
+  // Effective scale = auto-fit times the user's zoom. Drag math divides by this,
+  // so moves stay correct at any zoom.
+  const scale = fitScale * zoom;
 
   const elements = resolveSlide(slide, theme, footerText);
 

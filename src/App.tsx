@@ -3,6 +3,8 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { Deck } from "./model/deck";
 import { SlideCanvas } from "./preview/SlideCanvas";
 import { ChatDock } from "./preview/ChatDock";
+import { Toolbox, type ZoomAction } from "./preview/Toolbox";
+import { ModeContext, type Mode } from "./preview/mode";
 import deckJson from "../deck.json";
 
 const deck = deckJson as Deck;
@@ -12,14 +14,26 @@ const RAIL_MAX = 480;
 const RAIL_HIDE_AT = 60; // drag narrower than this and the rail snaps shut
 const RAIL_KEY = "ppt.railWidth";
 
+const ZOOM_STEP = 0.1;
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 3;
+
 export default function App() {
   const [i, setI] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const cancelEdit = useRef(false);
   const railWidth = useRailWidth();
+  const [mode, setMode] = useState<Mode>("edit");
+  const [zoom, setZoom] = useState(1);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const slides = deck.slides;
   const clamp = (n: number) => Math.max(0, Math.min(slides.length - 1, n));
+
+  const onZoom = (a: ZoomAction) =>
+    setZoom((z) =>
+      a === "fit" ? 1 : Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + (a === "in" ? ZOOM_STEP : -ZOOM_STEP)))
+    );
 
   const startRename = (s: Deck["slides"][number]) => {
     setEditingId(s.id);
@@ -102,20 +116,30 @@ export default function App() {
       </div>
 
       <main className="main">
-        <div className="stage-region">
-          <SlideCanvas slide={slides[i]} footerText={deck.meta.footer} />
-          <div className="hud">
-            <button onClick={() => setI((p) => clamp(p - 1))} disabled={i === 0}>
-              ‹
-            </button>
-            <span>
-              {i + 1} / {slides.length} · {deck.slides[i].layout}
-            </span>
-            <button onClick={() => setI((p) => clamp(p + 1))} disabled={i === slides.length - 1}>
-              ›
-            </button>
+        <ModeContext.Provider value={mode}>
+          <div className="stage-region">
+            <SlideCanvas slide={slides[i]} footerText={deck.meta.footer} zoom={zoom} />
+            <Toolbox
+              mode={mode}
+              onMode={setMode}
+              onZoom={onZoom}
+              onResetPosition={() => resetPosition(slides[i].id)}
+              settingsOpen={settingsOpen}
+              onToggleSettings={() => setSettingsOpen((o) => !o)}
+            />
+            <div className="hud">
+              <button onClick={() => setI((p) => clamp(p - 1))} disabled={i === 0}>
+                ‹
+              </button>
+              <span>
+                {i + 1} / {slides.length} · {deck.slides[i].layout}
+              </span>
+              <button onClick={() => setI((p) => clamp(p + 1))} disabled={i === slides.length - 1}>
+                ›
+              </button>
+            </div>
           </div>
-        </div>
+        </ModeContext.Provider>
         <ChatDock />
       </main>
     </div>
@@ -175,6 +199,18 @@ async function renameSlide(id: string, label: string): Promise<void> {
     body: JSON.stringify({ id, label }),
   });
   if (!res.ok) alert("Rename failed. Is the dev server running?");
+}
+
+// Clears all element position offsets on a slide (undo drags). The file write
+// triggers Vite HMR, which reloads the preview with elements back at their
+// computed positions.
+async function resetPosition(id: string): Promise<void> {
+  const res = await fetch("/api/slides/reset-offsets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) alert("Reset failed. Is the dev server running?");
 }
 
 // Deletes a slide by persisting to deck.json; the file write triggers Vite HMR,

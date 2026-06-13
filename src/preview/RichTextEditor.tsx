@@ -18,6 +18,7 @@ import Highlight from "@tiptap/extension-highlight";
 import type { Span } from "../model/deck";
 import { FOOTER_SOURCE } from "../model/deck";
 import { spansToDoc, docToSpans, type PMDoc } from "./richtext";
+import { useMode } from "./mode";
 
 const COLOR = "#D64545";
 const HIGHLIGHT = "#FFE08A";
@@ -55,6 +56,7 @@ export function RichTextEditor({
   spans: Span[];
   children: React.ReactNode; // read-only run rendering, shown when not editing
 }) {
+  const mode = useMode();
   const [editing, setEditing] = useState(false);
   // The word the entering double-click selected in the read-mode span, carried
   // into the editor so it stays selected instead of collapsing to the end.
@@ -63,8 +65,9 @@ export function RichTextEditor({
   if (!editing) {
     return (
       <span
-        className="slide-editable"
+        className={"slide-editable" + (mode === "edit" ? " editable" : "")}
         onDoubleClick={(e) => {
+          if (mode !== "edit") return; // strict modes: only edit in edit mode
           initialSel.current = selectionOffsets(e.currentTarget);
           // Clear the browser's word selection now (offsets already captured):
           // otherwise it paints, then vanishes during the read->edit swap, then
@@ -72,7 +75,7 @@ export function RichTextEditor({
           window.getSelection()?.removeAllRanges();
           setEditing(true);
         }}
-        title="Double-click to edit"
+        title={mode === "edit" ? "Double-click to edit" : undefined}
       >
         {children}
       </span>

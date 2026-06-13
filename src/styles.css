@@ -30,10 +30,13 @@ body {
 }
 
 /* Inline-editable text inside a text box. No box-shaped outline here (that's the
-   .text-box's job); just the text cursor and a faint tint on the field being
-   edited so the active field reads inside a multi-field box. */
-.slide-editable {
+   .text-box's job); a faint tint marks the field being edited. The text cursor
+   shows only in edit mode (.editable), so move mode keeps the box's grab cursor. */
+.slide-editable.editable {
   cursor: text;
+}
+
+.slide-editable {
   /* Match ProseMirror's whitespace model so text doesn't reflow on entering
      edit mode. Read mode otherwise collapses consecutive spaces (white-space:
      normal) while the editor preserves them, shifting e.g. the footer's double
@@ -290,6 +293,77 @@ body {
 .hud button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Right-edge vertical toolbox over the slide. Same translucent palette as .hud. */
+.toolbox {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(20, 23, 30, 0.85);
+  border-radius: 12px;
+  z-index: 6;
+}
+
+.toolbox-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #c7ccd6;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.toolbox-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.toolbox-btn.active {
+  background: #3b6fd4;
+  color: #fff;
+}
+
+.toolbox-divider {
+  width: 20px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 2px 0;
+}
+
+/* Settings stub: floating card to the left of the toolbox. */
+.settings-panel {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 0;
+  width: 200px;
+  background: rgba(20, 23, 30, 0.96);
+  border: 1px solid #353b48;
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: #e7eaf0;
+}
+
+.settings-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.settings-panel-body {
+  font-size: 12px;
+  color: #9aa3b2;
 }
 
 /* Bottom-docked chat with the local Claude Code CLI. Height is drag-set inline

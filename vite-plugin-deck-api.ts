@@ -22,6 +22,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/rename", handleRenameSlide);
       server.middlewares.use("/api/slides/edit", handleEditSlide);
       server.middlewares.use("/api/slides/move", handleMoveSlide);
+      server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/chat/reset", handleChatReset);
       server.middlewares.use("/api/chat", handleChat);
@@ -295,6 +296,27 @@ async function moveSlideElement(id: string, key: string, dx: number, dy: number)
   slide.offsets ??= {};
   const prev = slide.offsets[key] ?? { dx: 0, dy: 0 };
   slide.offsets[key] = { dx: prev.dx + dx, dy: prev.dy + dy };
+  await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
+}
+
+// Reset position: drop all element offsets on a slide so elements return to
+// their computed positions. The whole `offsets` map is removed (per-slide undo).
+async function handleResetOffsets(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { id } = await readJsonBody(req);
+    await resetSlideOffsets(id);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+async function resetSlideOffsets(id: string): Promise<void> {
+  const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
+  const slide = deck.slides.find((s: { id: string }) => s.id === id);
+  if (!slide || !slide.offsets) return;
+  delete slide.offsets;
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
 }
 
