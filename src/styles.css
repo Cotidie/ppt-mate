@@ -672,15 +672,63 @@ body.gesture-active * {
   text-transform: capitalize;
 }
 
-.cp-stat {
+/* Usage gauges: a header row (label / pct / detail) above a thin track bar. */
+.cp-gauge {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.cp-gauge-head {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
   font-size: 12px;
   color: #c6ccd8;
 }
 
-.cp-stat span:first-child {
+.cp-gauge-label {
+  flex: 0 0 26px;
+  font-size: 10px;
+  font-weight: 600;
   color: #8b93a3;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cp-gauge-pct {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: #e7eaf0;
+}
+
+.cp-gauge-detail {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: #8b93a3;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cp-gauge-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cp-gauge-fill {
+  height: 100%;
+  background: #3b6fd4;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.cp-gauge-fill.warn {
+  background: #e8893d;
 }
 
 .chat-log {

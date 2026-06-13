@@ -6,6 +6,7 @@
 import type { Plugin, Connect } from "vite";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
 import { readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -16,6 +17,7 @@ const DECK_PATH = resolve(HERE, "deck.json");
 const OUT_DIR = resolve(HERE, "out");
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
+const CREDS_PATH = resolve(homedir(), ".claude/.credentials.json");
 
 // Captured so the export route can load the TypeScript exporter through Vite's
 // transform pipeline (ssrLoadModule) - plain Node can't import the .mts/.ts directly.
@@ -35,6 +37,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
+      server.middlewares.use("/api/usage", handleUsage);
       server.middlewares.use("/api/chat/reset", handleChatReset);
       server.middlewares.use("/api/chat", handleChat);
       bindShutdown(server.httpServer);
@@ -146,6 +149,46 @@ function readAccount(): Promise<unknown> {
   });
 }
 
+// Claude usage limits for the ChatDock panel: 5-hour and 7-day rolling windows.
+// Fetched from the OAuth usage endpoint (requires the access token from the
+// credentials file that the CLI keeps refreshed). Cached 30s to avoid hammering
+// the API on every chat turn; on any failure, returns `{available:false}` so the
+// panel degrades to "—" rather than erroring.
+type UsageCache = { value: unknown; at: number } | null;
+let usageCache: UsageCache = null;
+const USAGE_TTL_MS = 30_000;
+
+function handleUsage(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "GET") return next();
+  const now = Date.now();
+  const cached = usageCache && now - usageCache.at < USAGE_TTL_MS ? usageCache.value : null;
+  if (cached) { sendJson(res, 200, cached); return; }
+  readUsage().then(
+    (info) => { usageCache = { value: info, at: Date.now() }; sendJson(res, 200, info); },
+    () => sendJson(res, 200, { available: false }),
+  );
+}
+
+async function readUsage(): Promise<unknown> {
+  const creds = JSON.parse(await readFile(CREDS_PATH, "utf8"));
+  const token: string = creds?.claudeAiOauth?.accessToken;
+  if (!token) return { available: false };
+  const r = await fetch("https://api.anthropic.com/api/oauth/usage", {
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "anthropic-beta": "oauth-2025-04-20",
+      "anthropic-version": "2023-06-01",
+    },
+  });
+  if (!r.ok) return { available: false };
+  const j = await r.json() as { five_hour?: { utilization?: number; resets_at?: string }; seven_day?: { utilization?: number; resets_at?: string } };
+  return {
+    available: true,
+    fiveHour: j.five_hour ? { utilization: j.five_hour.utilization ?? 0, resetsAt: j.five_hour.resets_at ?? "" } : null,
+    sevenDay: j.seven_day ? { utilization: j.seven_day.utilization ?? 0, resetsAt: j.seven_day.resets_at ?? "" } : null,
+  };
+}
+
 // A single persistent Claude Agent SDK session per dev server, driven in
 // streaming-input mode: one long-lived `query` whose prompt is a pushable stream,
 // so every chat turn feeds the same conversation. Turns are serialized (one
@@ -221,9 +264,22 @@ class ClaudeSession {
         const model = (msg as { model?: string }).model;
         if (model) this.send("meta", JSON.stringify({ model }));
       } else if (msg.type === "result") {
-        // Cumulative session cost + this turn's token usage, for the dock panel.
-        const r = msg as { total_cost_usd?: number; usage?: unknown };
-        this.send("meta", JSON.stringify({ cost: r.total_cost_usd, usage: r.usage }));
+        // Context-window gauge: how many tokens have been consumed this session and
+        // how large the window is, so the panel can show e.g. "110K / 1.0M  11%".
+        type ResultMsg = {
+          usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+          modelUsage?: Record<string, { contextWindow?: number }>;
+        };
+        const r = msg as ResultMsg;
+        const u = r.usage;
+        if (u) {
+          const contextUsed = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+          const models = r.modelUsage ? Object.values(r.modelUsage) : [];
+          const contextWindow = models[0]?.contextWindow ?? 1_000_000;
+          this.send("meta", JSON.stringify({ contextUsed, contextWindow }));
+          // Invalidate the usage cache so the next /api/usage call fetches fresh 5h/7d data.
+          usageCache = null;
+        }
         this.endTurn?.();
       }
     }
