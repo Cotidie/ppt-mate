@@ -66,6 +66,10 @@ export function RichTextEditor({
         className="slide-editable"
         onDoubleClick={(e) => {
           initialSel.current = selectionOffsets(e.currentTarget);
+          // Clear the browser's word selection now (offsets already captured):
+          // otherwise it paints, then vanishes during the read->edit swap, then
+          // the editor re-applies it - a visible blink. Now it appears once.
+          window.getSelection()?.removeAllRanges();
           setEditing(true);
         }}
         title="Double-click to edit"
