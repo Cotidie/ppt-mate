@@ -22,28 +22,42 @@ import {
   nearGeom,
   type Geom,
 } from "./gesture";
+import { snapMove, type Guide } from "./snap";
 
 type Box = Geom & { key: string };
 type Rect = { x: number; y: number; w: number; h: number };
 
+// Alignment-snap pull radius, constant in screen px (converted to inches via the
+// live scale so it feels the same at any zoom).
+const SNAP_PX = 6;
+
 export interface SelectionApi {
   selected: ReadonlySet<string>;
   marquee: Rect | null; // stage px (unscaled), rendered inside the scaled stage
+  guides: Guide[]; // active alignment guides (inches) during a snapped move
   groupGeomFor(key: string): Geom | null;
   selectOnly(key: string): void;
   clear(): void;
   beginMarquee(e: ReactPointerEvent, scale: number): void;
   beginGroupMove(e: ReactPointerEvent, scale: number): void;
+  // Snap a moving box to the other elements' alignment lines; sets the guides and
+  // returns the correction to add to the in-flight delta. `bypass` (Alt held)
+  // skips snapping and clears guides. Used by the single-move hook and group move.
+  snapMoveBox(moving: Geom, exclude: Iterable<string>, scale: number, bypass: boolean): { dx: number; dy: number };
+  clearGuides(): void;
 }
 
 const NOOP: SelectionApi = {
   selected: new Set(),
   marquee: null,
+  guides: [],
   groupGeomFor: () => null,
   selectOnly: () => {},
   clear: () => {},
   beginMarquee: () => {},
   beginGroupMove: () => {},
+  snapMoveBox: () => ({ dx: 0, dy: 0 }),
+  clearGuides: () => {},
 };
 
 export const SelectionContext = createContext<SelectionApi>(NOOP);
@@ -60,6 +74,7 @@ function overlaps(a: Box, m: Rect): boolean {
 export function useSelectionState(elements: Element[], slideId: string, scale: number): SelectionApi {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<Rect | null>(null);
+  const [guides, setGuides] = useState<Guide[]>([]);
   // Absolute optimistic geometry per member during/after a group move, held until
   // props catch up (mirrors the single-element gesture hold).
   const [groupOpt, setGroupOpt] = useState<Map<string, Geom> | null>(null);
@@ -77,6 +92,7 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
     setSelected(new Set());
     setGroupOpt(null);
     setMarquee(null);
+    setGuides([]);
   }, [slideId]);
 
   // Release the group hold once deck.json (HMR) reports every member at its
@@ -96,6 +112,23 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
   }
   function clear() {
     setSelected(new Set());
+  }
+
+  function clearGuides() {
+    setGuides([]);
+  }
+
+  function snapMoveBox(moving: Geom, exclude: Iterable<string>, sc: number, bypass: boolean): { dx: number; dy: number } {
+    if (bypass) {
+      setGuides([]);
+      return { dx: 0, dy: 0 };
+    }
+    const ex = new Set(exclude);
+    const others = boxesRef.current.filter((b) => !ex.has(b.key));
+    const tol = SNAP_PX / (PX_PER_IN * sc);
+    const r = snapMove(moving, others, tol);
+    setGuides(r.guides);
+    return { dx: r.dx, dy: r.dy };
   }
 
   function beginMarquee(e: ReactPointerEvent, sc: number) {
@@ -142,6 +175,14 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
     const bases = keys
       .map((k) => boxesRef.current.find((b) => b.key === k))
       .filter((b): b is Box => b != null);
+    // The group's bounding box is what snaps; the same delta then moves every
+    // member, so relative positions are preserved.
+    const union: Geom = {
+      x: Math.min(...bases.map((b) => b.x)),
+      y: Math.min(...bases.map((b) => b.y)),
+      w: Math.max(...bases.map((b) => b.x + b.w)) - Math.min(...bases.map((b) => b.x)),
+      h: Math.max(...bases.map((b) => b.y + b.h)) - Math.min(...bases.map((b) => b.y)),
+    };
     const startX = e.clientX;
     const startY = e.clientY;
     let moved = false;
@@ -156,8 +197,13 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
         document.body.style.setProperty("--gesture-cursor", "grabbing");
       }
       moved = true;
-      const dx = mxPx / (PX_PER_IN * sc);
-      const dy = myPx / (PX_PER_IN * sc);
+      const rawX = mxPx / (PX_PER_IN * sc);
+      const rawY = myPx / (PX_PER_IN * sc);
+      // Snap the moved union box to the non-member elements; add the correction.
+      const cand: Geom = { x: union.x + rawX, y: union.y + rawY, w: union.w, h: union.h };
+      const c = snapMoveBox(cand, keys, sc, ev.altKey);
+      const dx = rawX + c.dx;
+      const dy = rawY + c.dy;
       last = { dx, dy };
       const next = new Map<string, Geom>();
       // One delta for all: relative positions preserved by construction.
@@ -169,6 +215,7 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
       window.removeEventListener("pointerup", up);
       document.body.classList.remove("gesture-active");
       document.body.style.removeProperty("--gesture-cursor");
+      setGuides([]);
       if (moved && last) {
         // Commit all members atomically (one read-modify-write -> one HMR); keep
         // the hold and let the catch-up effect release it when props match.
@@ -184,10 +231,13 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
   return {
     selected,
     marquee,
+    guides,
     groupGeomFor: (key) => groupOpt?.get(key) ?? null,
     selectOnly,
     clear,
     beginMarquee,
     beginGroupMove,
+    snapMoveBox,
+    clearGuides,
   };
 }

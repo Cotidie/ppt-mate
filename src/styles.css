@@ -116,6 +116,21 @@ body.gesture-active * {
   z-index: 6;
 }
 
+/* Alignment guide line shown while a move snaps to another element. A warm accent
+   distinct from the blue selection; non-interactive. */
+.snap-guide {
+  position: absolute;
+  background: #e8893d;
+  pointer-events: none;
+  z-index: 7;
+}
+.snap-guide-x {
+  width: 1px;
+}
+.snap-guide-y {
+  height: 1px;
+}
+
 .resize-handle {
   position: absolute;
   width: 9px;

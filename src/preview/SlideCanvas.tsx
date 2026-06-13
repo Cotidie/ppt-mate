@@ -87,6 +87,24 @@ export function SlideCanvas({
               }}
             />
           )}
+          {/* Alignment guides (inches -> unscaled stage px). An x-guide is a thin
+              vertical line at `at` spanning start..end; a y-guide the horizontal
+              counterpart. Drawn inside the scaled stage, like the marquee. */}
+          {selection.guides.map((g, i) =>
+            g.axis === "x" ? (
+              <div
+                key={i}
+                className="snap-guide snap-guide-x"
+                style={{ left: g.at * PX_PER_IN, top: g.start * PX_PER_IN, height: (g.end - g.start) * PX_PER_IN }}
+              />
+            ) : (
+              <div
+                key={i}
+                className="snap-guide snap-guide-y"
+                style={{ top: g.at * PX_PER_IN, left: g.start * PX_PER_IN, width: (g.end - g.start) * PX_PER_IN }}
+              />
+            )
+          )}
         </div>
       </div>
     </div>

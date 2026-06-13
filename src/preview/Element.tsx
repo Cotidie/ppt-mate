@@ -46,6 +46,7 @@ const inPx = (v: number) => v * PX_PER_IN;
 // Window listeners (not pointer capture) keep the gesture alive off the box.
 function useElementGesture(slideId: string, key: string, scale: number, base: Geom) {
   const mode = useMode();
+  const sel = useSelection();
   const [optimistic, setOptimistic] = useState<Geom | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -79,13 +80,23 @@ function useElementGesture(slideId: string, key: string, scale: number, base: Ge
       // Screen px -> inches: the stage is CSS-scaled, so undo scale too.
       const mx = mxPx / (PX_PER_IN * scale);
       const my = myPx / (PX_PER_IN * scale);
-      last = dir ? dirDelta(dir, mx, my, base.w, base.h) : { dx: mx, dy: my, dw: 0, dh: 0 };
+      if (dir) {
+        last = dirDelta(dir, mx, my, base.w, base.h);
+      } else {
+        // Move: snap the candidate box to nearby element alignment lines (Alt
+        // bypasses). The correction is added to the raw delta; the controller
+        // draws the guides.
+        const cand = applyDelta(base, { dx: mx, dy: my, dw: 0, dh: 0 });
+        const c = sel.snapMoveBox(cand, [key], scale, ev.altKey);
+        last = { dx: mx + c.dx, dy: my + c.dy, dw: 0, dh: 0 };
+      }
       setOptimistic(applyDelta(base, last));
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDragging(false);
+      sel.clearGuides();
       document.body.classList.remove("gesture-active");
       document.body.style.removeProperty("--gesture-cursor");
       // Keep the optimistic geometry held (it's already set to the final spot);
