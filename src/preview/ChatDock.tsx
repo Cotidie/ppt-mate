@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -31,7 +32,7 @@ export function ChatDock() {
     setMessages((m) => [...m, { role: "user", text: message }, { role: "assistant", text: "" }]);
     setStreaming(true);
     try {
-      await streamReply(message, applyEvent);
+      await streamReply(message, applyEvent, new AbortController().signal);
     } catch (err) {
       applyEvent({ kind: "error", text: String(err) });
     } finally {
@@ -169,39 +170,41 @@ type ChatEvent =
   | { kind: "delta"; text: string }
   | { kind: "error"; text: string };
 
-// POSTs the message and reads the SSE response, decoding each frame and handing
-// the caller a normalized ChatEvent. Resolves when the stream ends.
-async function streamReply(message: string, onEvent: (ev: ChatEvent) => void): Promise<void> {
-  const res = await fetch("/api/chat", {
+// POSTs the message and reads the SSE response via fetch-event-source, handing
+// the caller a normalized ChatEvent per frame. Resolves when the server ends the
+// stream (after the turn's `done`).
+async function streamReply(
+  message: string,
+  onEvent: (ev: ChatEvent) => void,
+  signal: AbortSignal
+): Promise<void> {
+  await fetchEventSource("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message }),
+    signal,
+    openWhenHidden: true, // local dev tool: don't drop the turn on a hidden tab
+    async onopen(res) {
+      if (res.ok && res.headers.get("content-type")?.startsWith(EventStreamContentType)) return;
+      throw new Error(`Chat failed (${res.status}). Is the dev server running?`);
+    },
+    onmessage(ev) {
+      const parsed = toEvent(ev.event, ev.data);
+      if (parsed) onEvent(parsed);
+    },
+    onclose() {
+      // The server ends the response after the turn's `done`; this is expected,
+      // so return without throwing to avoid fetch-event-source's auto-retry.
+    },
+    onerror(err) {
+      throw err; // a real failure: stop, don't auto-retry against a dead server
+    },
   });
-  if (!res.ok || !res.body) throw new Error(`Chat failed (${res.status}). Is the dev server running?`);
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let sep: number;
-    while ((sep = buf.indexOf("\n\n")) !== -1) {
-      const frame = buf.slice(0, sep);
-      buf = buf.slice(sep + 2);
-      const ev = parseFrame(frame);
-      if (ev) onEvent(ev);
-    }
-  }
 }
 
-// Turns one SSE frame into a ChatEvent. The server sends clean events now:
-// `delta` carries a JSON-encoded text chunk, `error` a JSON-encoded message,
-// `done` ends the turn.
-function parseFrame(frame: string): ChatEvent | null {
-  const event = matchField(frame, "event") ?? "message";
-  const data = matchField(frame, "data") ?? "";
+// Maps one SSE event to a ChatEvent. `delta` carries a JSON-encoded text chunk,
+// `error` a JSON-encoded message; `done`/unknown are ignored.
+function toEvent(event: string, data: string): ChatEvent | null {
   if (event === "delta") {
     try {
       return { kind: "delta", text: JSON.parse(data) };
@@ -218,12 +221,7 @@ function parseFrame(frame: string): ChatEvent | null {
     }
     return { kind: "error", text: text || "Claude Code failed to start." };
   }
-  return null; // done / unknown
-}
-
-function matchField(frame: string, field: string): string | undefined {
-  const line = frame.split("\n").find((l) => l.startsWith(field + ": "));
-  return line?.slice(field.length + 2);
+  return null;
 }
 
 function appendToLast(setMessages: React.Dispatch<React.SetStateAction<Message[]>>, text: string): void {
