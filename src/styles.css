@@ -73,6 +73,13 @@ body {
   outline: 2px solid #3b6fd4;
 }
 
+/* During a move/resize drag, force one cursor across the whole document so it
+   never reverts to the arrow over empty space or a slipped-away edge. */
+body.gesture-active,
+body.gesture-active * {
+  cursor: var(--gesture-cursor, default) !important;
+}
+
 .resize-handle {
   position: absolute;
   width: 9px;

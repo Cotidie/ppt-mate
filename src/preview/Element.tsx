@@ -27,6 +27,15 @@ type Delta = { dx: number; dy: number; dw: number; dh: number };
 type Dir = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 const DIRS: Dir[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 
+// The cursor to pin for the whole document during a gesture, so it never reverts
+// to the default arrow when the drag (driven by window listeners) is over empty
+// space or the resizing edge slips out from under the pointer. null dir = a move.
+const RESIZE_CURSOR: Record<Dir, string> = {
+  n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize",
+  ne: "nesw-resize", sw: "nesw-resize", nw: "nwse-resize", se: "nwse-resize",
+};
+const cursorFor = (dir: Dir | null) => (dir ? RESIZE_CURSOR[dir] : "grabbing");
+
 // Translate a handle's screen drag (already in inches) into a geometry delta,
 // clamped so the box never shrinks below MIN_IN (and so a min-size hit pins the
 // opposite edge instead of dragging it). West/north edges move the origin.
@@ -99,7 +108,12 @@ function useElementGesture(slideId: string, key: string, scale: number, base: Ge
       const mxPx = ev.clientX - startX;
       const myPx = ev.clientY - startY;
       if (!moved && Math.hypot(mxPx, myPx) < DRAG_THRESHOLD) return;
-      if (!moved) setDragging(true);
+      if (!moved) {
+        setDragging(true);
+        // Pin the cursor document-wide for the whole drag (see RESIZE_CURSOR).
+        document.body.classList.add("gesture-active");
+        document.body.style.setProperty("--gesture-cursor", cursorFor(dir));
+      }
       moved = true;
       // Screen px -> inches: the stage is CSS-scaled, so undo scale too.
       const mx = mxPx / (PX_PER_IN * scale);
@@ -111,6 +125,8 @@ function useElementGesture(slideId: string, key: string, scale: number, base: Ge
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDragging(false);
+      document.body.classList.remove("gesture-active");
+      document.body.style.removeProperty("--gesture-cursor");
       // Keep the optimistic geometry held (it's already set to the final spot);
       // commit, and let the catch-up effect release it when props match.
       if (moved && last) void commitTransform(slideId, key, last);
@@ -361,7 +377,9 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
   const { x, y, w, h } = optimistic ?? e;
 
   const isText = e.kind === "text";
-  const showHandles = mode === "move" && hover;
+  // Keep handles + selection outline while dragging, even if the resizing edge
+  // slips out from under the cursor and clears hover.
+  const showHandles = mode === "move" && (hover || dragging);
 
   const frameStyle: CSSProperties = {
     position: "absolute",
