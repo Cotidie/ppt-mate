@@ -74,6 +74,11 @@ export function RichTextEditor({
   // Guards both directions: skip a no-op commit, and skip clobbering the editor
   // with an incoming prop that already matches what it shows.
   const synced = useRef(JSON.stringify(spansToDoc(spans)));
+  // True from the moment we commit an edit until the committed value echoes back
+  // through props (server write -> HMR). While awaiting, the `spans` prop still
+  // holds the STALE pre-commit value; without this hold the sync effect would
+  // briefly setContent that stale value and visibly revert the just-made edit.
+  const awaitingCommit = useRef(false);
 
   const editor = useEditor({
     extensions: [
@@ -89,7 +94,13 @@ export function RichTextEditor({
     ],
     content: spansToDoc(spans),
     editable,
-    onFocus: () => setFocused(true),
+    onFocus: () => {
+      // Re-entering the editor ends any pending commit-hold: the user is the
+      // source of truth again (and it guards against a hold sticking if a route
+      // normalizes the value so props never echo it byte-for-byte, e.g. footer).
+      awaitingCommit.current = false;
+      setFocused(true);
+    },
     onBlur: () => {
       // While a color picker is open it owns focus; ignore this blur so the
       // bubble stays mounted and we don't commit mid-interaction.
@@ -106,13 +117,20 @@ export function RichTextEditor({
     editor?.setEditable(editable);
   }, [editor, editable]);
 
-  // Pull external changes (HMR after a commit, or the chat agent editing
-  // deck.json) into the editor - but never while the user is typing in it, and
-  // never when the incoming value already matches what's shown.
+  // Pull external changes (the chat agent editing deck.json) into the editor -
+  // but never while the user is typing in it, and never when it already matches.
+  // The optimistic-hold rule mirrors the geometry gesture: our own committed
+  // value is authoritative until props catch up, so a lagging stale prop can't
+  // revert the edit. Only a prop that differs from `synced` while we are NOT
+  // awaiting our own commit is a genuine external change worth applying.
   const incoming = JSON.stringify(spansToDoc(spans));
   useEffect(() => {
     if (!editor || focused) return;
-    if (incoming === synced.current) return;
+    if (incoming === synced.current) {
+      awaitingCommit.current = false; // props caught up to our commit; release hold
+      return;
+    }
+    if (awaitingCommit.current) return; // props still lagging our own edit; hold
     editor.commands.setContent(JSON.parse(incoming) as PMDoc, { emitUpdate: false });
     synced.current = incoming;
   }, [editor, incoming, focused]);
@@ -134,6 +152,7 @@ export function RichTextEditor({
     const nextJSON = JSON.stringify(spansToDoc(next));
     if (nextJSON === synced.current) return; // unchanged
     synced.current = nextJSON;
+    awaitingCommit.current = true; // hold the edit until props echo it back (HMR)
     // The footer is the deck-wide meta string, not a slide field: flatten the
     // edited runs to plain text and commit it via its own route.
     if (path === FOOTER_SOURCE) void commitFooter(next);
