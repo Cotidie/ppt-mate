@@ -12,6 +12,7 @@
     "migrate:deck": "tsx scripts/migrate-deck-richtext.mts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.177",
     "@tiptap/extension-bold": "^3.26.1",
     "@tiptap/extension-color": "^3.26.1",
     "@tiptap/extension-document": "^3.26.1",
