@@ -7,7 +7,7 @@
 // generic frame is what lets resize handles attach to any kind - including <img>
 // and <table>, which can't host child handles directly.
 
-import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { Align, Element, Para, Run, VAlign } from "../layout/element";
 import type { Span } from "../model/deck";
 import { PX_PER_IN } from "../theme/theme";
@@ -47,12 +47,42 @@ function dirDelta(dir: Dir, mx: number, my: number, baseW: number, baseH: number
   return { dx, dy, dw, dh };
 }
 
-// One hook drives both gestures. `pending` is the live (clamped) delta in inches
-// that the frame previews; on release it commits to deck.json. Window listeners
-// (not pointer capture) keep the gesture alive while the cursor leaves the box.
-function useElementGesture(slideId: string, key: string, scale: number, baseW: number, baseH: number) {
+type Geom = { x: number; y: number; w: number; h: number };
+
+const nearGeom = (a: Geom, b: Geom) =>
+  Math.abs(a.x - b.x) < 1e-3 &&
+  Math.abs(a.y - b.y) < 1e-3 &&
+  Math.abs(a.w - b.w) < 1e-3 &&
+  Math.abs(a.h - b.h) < 1e-3;
+
+// Apply a clamped delta to a base geometry, mirroring resolveSlide's min clamp so
+// the optimistic preview matches the committed result exactly.
+function applyDelta(base: Geom, d: Delta): Geom {
+  return {
+    x: base.x + d.dx,
+    y: base.y + d.dy,
+    w: Math.max(MIN_IN, base.w + d.dw),
+    h: Math.max(MIN_IN, base.h + d.dh),
+  };
+}
+
+// One hook drives both gestures. It tracks an *absolute* optimistic geometry the
+// frame renders instead of the resolved props: live during the drag, and HELD
+// after release until deck.json (via the server + HMR) reports the same geometry
+// back in props. Holding past release is what kills the flicker - clearing
+// immediately would snap the element back to its pre-gesture box for the
+// fetch->write->HMR round-trip. Because the hold is absolute (not an additive
+// delta), the handoff to props is value-identical: no rollback, no double-apply.
+// Window listeners (not pointer capture) keep the gesture alive off the box.
+function useElementGesture(slideId: string, key: string, scale: number, base: Geom) {
   const mode = useMode();
-  const [pending, setPending] = useState<Delta | null>(null);
+  const [optimistic, setOptimistic] = useState<Geom | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  // Release the hold once props catch up to the committed geometry.
+  useEffect(() => {
+    if (optimistic && nearGeom(base, optimistic)) setOptimistic(null);
+  }, [base.x, base.y, base.w, base.h, optimistic]);
 
   function begin(e: ReactPointerEvent, dir: Dir | null) {
     if (e.button !== 0) return;
@@ -69,18 +99,22 @@ function useElementGesture(slideId: string, key: string, scale: number, baseW: n
       const mxPx = ev.clientX - startX;
       const myPx = ev.clientY - startY;
       if (!moved && Math.hypot(mxPx, myPx) < DRAG_THRESHOLD) return;
+      if (!moved) setDragging(true);
       moved = true;
       // Screen px -> inches: the stage is CSS-scaled, so undo scale too.
       const mx = mxPx / (PX_PER_IN * scale);
       const my = myPx / (PX_PER_IN * scale);
-      last = dir ? dirDelta(dir, mx, my, baseW, baseH) : { dx: mx, dy: my, dw: 0, dh: 0 };
-      setPending(last);
+      last = dir ? dirDelta(dir, mx, my, base.w, base.h) : { dx: mx, dy: my, dw: 0, dh: 0 };
+      setOptimistic(applyDelta(base, last));
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      setDragging(false);
+      // Keep the optimistic geometry held (it's already set to the final spot);
+      // commit, and let the catch-up effect release it when props match.
       if (moved && last) void commitTransform(slideId, key, last);
-      setPending(null);
+      else setOptimistic(null);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -96,7 +130,7 @@ function useElementGesture(slideId: string, key: string, scale: number, baseW: n
   // A handle press starts a resize (handles only render in move mode).
   const startResize = (dir: Dir) => (e: ReactPointerEvent) => begin(e, dir);
 
-  return { mode, pending, bodyProps, startResize };
+  return { mode, optimistic, dragging, bodyProps, startResize };
 }
 
 function ResizeHandles({ startResize }: { startResize: (dir: Dir) => (e: ReactPointerEvent) => void }) {
@@ -314,15 +348,17 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
 // ---------------------------------------------------------------------------
 
 export function ElementView({ e, slideId, scale }: { e: Element; slideId: string; scale: number }) {
-  const { mode, pending, bodyProps, startResize } = useElementGesture(slideId, e.key, scale, e.w, e.h);
+  const { mode, optimistic, dragging, bodyProps, startResize } = useElementGesture(
+    slideId,
+    e.key,
+    scale,
+    e
+  );
   const [hover, setHover] = useState(false);
 
-  // Live geometry while dragging a move/resize gesture; otherwise the resolved
-  // box. Clamp mirrors resolveSlide so the preview matches the committed result.
-  const x = e.x + (pending?.dx ?? 0);
-  const y = e.y + (pending?.dy ?? 0);
-  const w = Math.max(MIN_IN, e.w + (pending?.dw ?? 0));
-  const h = Math.max(MIN_IN, e.h + (pending?.dh ?? 0));
+  // The optimistic geometry (live during a gesture, held until props catch up)
+  // wins over the resolved props; otherwise render the resolved box.
+  const { x, y, w, h } = optimistic ?? e;
 
   const isText = e.kind === "text";
   const showHandles = mode === "move" && hover;
@@ -337,7 +373,7 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
     // Non-text content clips to its box; text overflows so auto-grow shows, and
     // so the editor's floating BubbleMenu isn't cropped.
     overflow: isText ? "visible" : "hidden",
-    cursor: mode === "move" ? (pending ? "grabbing" : "grab") : "default",
+    cursor: mode === "move" ? (dragging ? "grabbing" : "grab") : "default",
     touchAction: "none",
     // Move mode is gesture-only; never let a drag highlight text.
     userSelect: mode === "move" ? "none" : undefined,
