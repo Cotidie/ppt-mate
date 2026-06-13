@@ -31,11 +31,13 @@ body {
 }
 
 /* While editing, lift the whole slide element above siblings painted later in
-   DOM order (e.g. the closing rule/footer). Without this, those siblings cover
-   the floating BubbleMenu, since the menu's own z-index only ranks it within
-   this element's box. Stage children are already position:absolute. */
+   DOM order (e.g. the closing rule/footer), and stop clipping it: text elements
+   set overflow:hidden inline, which would clip the floating BubbleMenu where it
+   extends past the element's box (revealing the rule/background behind it).
+   Stage children are already position:absolute. */
 .stage > *:has(.slide-editable.editing) {
   z-index: 5;
+  overflow: visible !important;
 }
 
 /* TipTap's ProseMirror wraps text in a block <p> that carries the UA-default
