@@ -239,11 +239,13 @@ function AccountPanel({ account, stats, usage }: { account: Account | null; stat
   return (
     <aside className="chat-panel">
       <div className="cp-section">
-        <div className="cp-label">Account</div>
+        <div className="cp-head">
+          <span className="cp-label">Account</span>
+          {account?.subscriptionType && (
+            <span className="cp-badge">{account.subscriptionType}</span>
+          )}
+        </div>
         <div className="cp-value" title={account?.email}>{account?.email ?? "…"}</div>
-        {account?.subscriptionType && (
-          <span className="cp-badge">{account.subscriptionType}</span>
-        )}
       </div>
       <div className="cp-section">
         <div className="cp-label">Model</div>

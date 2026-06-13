@@ -644,6 +644,12 @@ body.gesture-active * {
   gap: 3px;
 }
 
+.cp-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .cp-label {
   font-size: 10px;
   font-weight: 600;
@@ -661,8 +667,6 @@ body.gesture-active * {
 }
 
 .cp-badge {
-  align-self: flex-start;
-  margin-top: 2px;
   padding: 1px 7px;
   border-radius: 999px;
   background: #2d3950;
