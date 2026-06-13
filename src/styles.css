@@ -777,6 +777,95 @@ body.gesture-active * {
   border: 1px solid #5a2d33;
 }
 
+/* "Claude sees" context strip: a live, clickable summary of the agent's
+   awareness, sitting between the chat log and the input. */
+.ctx-wrap {
+  position: relative;
+}
+.ctx-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid #2a2f3a;
+  color: #8b93a3;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+.ctx-bar:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.ctx-bar.flash {
+  background: rgba(59, 111, 212, 0.14);
+}
+.ctx-eye {
+  display: inline-flex;
+  color: #6b7280;
+  flex: 0 0 auto;
+}
+.ctx-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #6b7280;
+  flex: 0 0 auto;
+}
+.ctx-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #232834;
+  color: #c2c8d2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  font-variant-numeric: tabular-nums;
+}
+.ctx-chip.warn {
+  background: rgba(232, 137, 61, 0.18);
+  color: #e8a86b;
+}
+.ctx-caret {
+  margin-left: auto;
+  color: #6b7280;
+  flex: 0 0 auto;
+}
+/* Detail popover: the literal [context] line stitched into each turn. Opens
+   upward (the strip sits near the bottom of the dock). */
+.ctx-pop {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% + 6px);
+  background: rgba(20, 23, 30, 0.98);
+  border: 1px solid #353b48;
+  border-radius: 10px;
+  padding: 10px 12px;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.ctx-pop-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+.ctx-pop-line {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #e7eaf0;
+}
+
 .chat-input-row {
   display: flex;
   gap: 8px;

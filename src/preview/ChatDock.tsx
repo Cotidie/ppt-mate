@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
+import { AgentContextBar } from "./AgentContextBar";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -138,6 +139,7 @@ export function ChatDock() {
           </div>
         ))}
       </div>
+      <AgentContextBar />
       <div className="chat-input-row">
         <textarea
           className="chat-input"
