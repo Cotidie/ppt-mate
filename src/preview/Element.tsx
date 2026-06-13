@@ -282,7 +282,6 @@ function ElementBody({ e, slideId }: { e: Element; slideId: string }) {
   // text
   return (
     <div
-      className="text-box"
       style={{
         width: "100%",
         // Auto-grow: the box is never shorter than its laid-out height (so
@@ -347,7 +346,7 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
 
   return (
     <div
-      className={"el-frame" + (showHandles ? " selected" : "")}
+      className={"el-frame " + mode + (isText ? " editable" : "") + (showHandles ? " selected" : "")}
       style={frameStyle}
       {...bodyProps}
       onPointerEnter={() => setHover(true)}
