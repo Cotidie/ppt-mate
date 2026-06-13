@@ -24,6 +24,25 @@ const HIGHLIGHT = "#FFE08A";
 // Single-paragraph schema: no hard breaks, so Enter is free to commit.
 const OneLineDocument = Document.extend({ content: "paragraph" });
 
+type CharRange = { from: number; to: number };
+
+// The character offsets of the live selection within `root`, or null when the
+// selection is collapsed or escapes the element. Used to carry the word a fast
+// double-click selected in the read-mode span across the swap into the editor.
+function selectionOffsets(root: HTMLElement): CharRange | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  const pre = document.createRange();
+  pre.selectNodeContents(root);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const from = pre.toString().length;
+  pre.setEnd(range.endContainer, range.endOffset);
+  const to = pre.toString().length;
+  return to > from ? { from, to } : null;
+}
+
 export function RichTextEditor({
   slideId,
   path,
@@ -36,12 +55,18 @@ export function RichTextEditor({
   children: React.ReactNode; // read-only run rendering, shown when not editing
 }) {
   const [editing, setEditing] = useState(false);
+  // The word the entering double-click selected in the read-mode span, carried
+  // into the editor so it stays selected instead of collapsing to the end.
+  const initialSel = useRef<CharRange | null>(null);
 
   if (!editing) {
     return (
       <span
         className="slide-editable"
-        onDoubleClick={() => setEditing(true)}
+        onDoubleClick={(e) => {
+          initialSel.current = selectionOffsets(e.currentTarget);
+          setEditing(true);
+        }}
         title="Double-click to edit"
       >
         {children}
@@ -53,6 +78,7 @@ export function RichTextEditor({
       slideId={slideId}
       path={path}
       spans={spans}
+      initialSel={initialSel.current}
       onClose={() => setEditing(false)}
     />
   );
@@ -62,11 +88,13 @@ function EditorInstance({
   slideId,
   path,
   spans,
+  initialSel,
   onClose,
 }: {
   slideId: string;
   path: string;
   spans: Span[];
+  initialSel: CharRange | null;
   onClose: () => void;
 }) {
   // Guards the field against more than one finalize. Enter, blur, and a
@@ -88,7 +116,18 @@ function EditorInstance({
       Highlight.configure({ multicolor: true }),
     ],
     content: spansToDoc(spans),
-    autofocus: "end",
+    // When a double-click selected a word, restore it in onCreate; otherwise
+    // drop the caret at the end.
+    autofocus: initialSel ? false : "end",
+    onCreate({ editor }) {
+      if (!initialSel) return;
+      // Single paragraph: char offset n maps to ProseMirror position n + 1
+      // (the paragraph node opens at 0, text starts at 1).
+      const max = editor.state.doc.content.size;
+      const from = Math.min(initialSel.from + 1, max);
+      const to = Math.min(initialSel.to + 1, max);
+      editor.chain().focus().setTextSelection({ from, to }).run();
+    },
     immediatelyRender: true,
     editorProps: {
       handleKeyDown(_view, event) {
