@@ -30,6 +30,20 @@ body {
   background: rgba(59, 111, 212, 0.08);
 }
 
+/* TipTap's ProseMirror wraps text in a block <p> that carries the UA-default
+   margin: 1em 0 (40px at the title font). Read mode renders runs inline with no
+   such margin, so without this the text jumps down on entering edit mode. Zero
+   the block's box and strip the contentEditable focus ring. */
+.slide-editable .ProseMirror,
+.slide-editable .ProseMirror p {
+  margin: 0;
+  padding: 0;
+}
+
+.slide-editable .ProseMirror:focus {
+  outline: none;
+}
+
 .app {
   display: grid;
   /* minmax(0, 1fr): without the 0-min, the track's min-content is the 1280px
