@@ -16,6 +16,7 @@ export function resolveTable(s: TableSlide, t: Theme, footerText: string): Eleme
     const h = 0.5;
     els.push({
       kind: "text",
+      key: "verdict",
       x,
       y: top,
       w,
@@ -45,6 +46,7 @@ export function resolveTable(s: TableSlide, t: Theme, footerText: string): Eleme
 
   els.push({
     kind: "table",
+    key: "table",
     x,
     y: top,
     w,

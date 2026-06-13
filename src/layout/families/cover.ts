@@ -14,6 +14,7 @@ export function resolveCover(s: Cover, t: Theme, footerText: string): Element[] 
   if (s.kicker) {
     els.push({
       kind: "text",
+      key: "kicker",
       x,
       y,
       w,
@@ -32,6 +33,7 @@ export function resolveCover(s: Cover, t: Theme, footerText: string): Element[] 
   const titleH = ptToIn(t.type.coverTitle) * 5 * 1.12;
   els.push({
     kind: "text",
+    key: "title",
     x,
     y,
     w: titleW,
@@ -50,6 +52,7 @@ export function resolveCover(s: Cover, t: Theme, footerText: string): Element[] 
     const h = 0.6;
     els.push({
       kind: "text",
+      key: "citation",
       x,
       y,
       w: w * 0.62,
@@ -67,6 +70,7 @@ export function resolveCover(s: Cover, t: Theme, footerText: string): Element[] 
   if (s.authors?.length) {
     els.push({
       kind: "text",
+      key: "authors",
       x,
       y,
       w: w * 0.62,

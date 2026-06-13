@@ -31,6 +31,7 @@ export type Para = {
 
 export type TextEl = {
   kind: "text";
+  key: string; // stable per-slide id for position overrides
   x: number;
   y: number;
   w: number;
@@ -46,6 +47,7 @@ export type TextEl = {
 
 export type RectEl = {
   kind: "rect";
+  key: string;
   x: number;
   y: number;
   w: number;
@@ -58,6 +60,7 @@ export type RectEl = {
 
 export type ImageEl = {
   kind: "image";
+  key: string;
   x: number;
   y: number;
   w: number;
@@ -69,6 +72,7 @@ export type TableCellEl = { runs: Run[]; source?: string };
 
 export type TableEl = {
   kind: "table";
+  key: string;
   x: number;
   y: number;
   w: number;

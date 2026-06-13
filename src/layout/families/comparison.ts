@@ -24,10 +24,11 @@ export function resolveComparison(s: Comparison, t: Theme, footerText: string): 
   s.cards.forEach((card, i) => {
     const cx = x + i * (cardW + gap);
 
-    els.push({ kind: "rect", x: cx, y: top, w: cardW, h: cardH, fill: t.colors.cardBody, radius: r });
-    els.push({ kind: "rect", x: cx, y: top, w: cardW, h: headerH, fill: t.colors.cardHeader, radius: r });
+    els.push({ kind: "rect", key: `card.${i}.bodyRect`, x: cx, y: top, w: cardW, h: cardH, fill: t.colors.cardBody, radius: r });
+    els.push({ kind: "rect", key: `card.${i}.headerRect`, x: cx, y: top, w: cardW, h: headerH, fill: t.colors.cardHeader, radius: r });
     els.push({
       kind: "text",
+      key: `card.${i}.header`,
       x: cx + 0.25,
       y: top,
       w: cardW - 0.5,
@@ -50,6 +51,7 @@ export function resolveComparison(s: Comparison, t: Theme, footerText: string): 
     }));
     els.push({
       kind: "text",
+      key: `card.${i}.body`,
       x: cx + 0.3,
       y: top + headerH + 0.2,
       w: cardW - 0.6,

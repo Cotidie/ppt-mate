@@ -29,12 +29,17 @@ export type TableRow = {
   cells: RichText[];
 };
 
+// Per-element position overrides (inches), keyed by the resolver's stable element
+// key. Deltas (not absolute) so a moved element survives content/theme reflow.
+export type Offsets = Record<string, { dx: number; dy: number }>;
+
 // navLabel: sidebar-only display name. Never rendered on the slide itself.
 export type Slide =
   | {
       id: string;
       layout: "cover";
       navLabel?: string;
+      offsets?: Offsets;
       kicker?: RichText;
       title: RichText;
       citation?: RichText;
@@ -44,6 +49,7 @@ export type Slide =
       id: string;
       layout: "body";
       navLabel?: string;
+      offsets?: Offsets;
       kicker?: RichText;
       title: RichText;
       bullets: Bullet[];
@@ -53,6 +59,7 @@ export type Slide =
       id: string;
       layout: "comparison";
       navLabel?: string;
+      offsets?: Offsets;
       kicker?: RichText;
       title: RichText;
       cards: Card[]; // 2-3
@@ -62,6 +69,7 @@ export type Slide =
       id: string;
       layout: "table";
       navLabel?: string;
+      offsets?: Offsets;
       kicker?: RichText;
       title: RichText;
       verdict?: RichText;
@@ -73,6 +81,7 @@ export type Slide =
       id: string;
       layout: "closing";
       navLabel?: string;
+      offsets?: Offsets;
       title: RichText;
       subtitle?: RichText;
     };

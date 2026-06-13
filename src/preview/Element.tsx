@@ -1,7 +1,7 @@
 // Renders one resolved Element as absolutely-positioned CSS. Inches -> px at 96/in,
 // points -> px at 96/72. This is the ONLY place geometry becomes pixels in the preview.
 
-import type { CSSProperties } from "react";
+import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import type { Element, Para, Run, VAlign } from "../layout/element";
 import type { Span } from "../model/deck";
 import { PX_PER_IN } from "../theme/theme";
@@ -9,6 +9,67 @@ import { RichTextEditor } from "./RichTextEditor";
 
 const PT_PX = 96 / 72;
 const inPx = (v: number) => v * PX_PER_IN;
+const DRAG_THRESHOLD = 3; // px (screen space) before a press becomes a move
+
+// Drag-to-move: presses on the element pan it, committing an inch-offset to
+// deck.json on release. Bails on editing text so TipTap keeps the pointer, and
+// only moves past a small threshold so clicks / double-click-to-edit survive.
+function useElementDrag(slideId: string, elKey: string, scale: number) {
+  const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
+  const start = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+
+  function onPointerDown(e: PointerEvent) {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest(".slide-editable.editing")) return;
+    // No pointer capture here: capturing would retarget click/dblclick away from
+    // the text span and break double-click-to-edit. Capture only once a real
+    // drag begins (see onPointerMove).
+    start.current = { x: e.clientX, y: e.clientY, moved: false };
+  }
+
+  function onPointerMove(e: PointerEvent) {
+    const s = start.current;
+    if (!s) return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    if (!s.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    if (!s.moved) {
+      s.moved = true;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* synthetic / already-captured pointers can't be captured */
+      }
+    }
+    setDrag({ dx, dy });
+  }
+
+  function onPointerUp(e: PointerEvent) {
+    const s = start.current;
+    start.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* capture may already be gone */
+    }
+    if (s?.moved) {
+      // Screen px -> inches: the stage is CSS-scaled, so undo scale too.
+      const dx = (e.clientX - s.x) / (PX_PER_IN * scale);
+      const dy = (e.clientY - s.y) / (PX_PER_IN * scale);
+      void commitMove(slideId, elKey, dx, dy);
+    }
+    setDrag(null);
+  }
+
+  // The translate lives inside the already-scaled stage, so divide by scale to
+  // track the cursor 1:1.
+  const dragStyle: CSSProperties = {
+    cursor: drag ? "grabbing" : "grab",
+    touchAction: "none",
+    ...(drag ? { transform: `translate(${drag.dx / scale}px, ${drag.dy / scale}px)` } : null),
+  };
+  return { dragProps: { onPointerDown, onPointerMove, onPointerUp }, dragStyle };
+}
 
 const justify: Record<VAlign, CSSProperties["justifyContent"]> = {
   top: "flex-start",
@@ -108,35 +169,41 @@ function Paragraph({
   );
 }
 
-export function ElementView({ e, slideId }: { e: Element; slideId: string }) {
+export function ElementView({ e, slideId, scale }: { e: Element; slideId: string; scale: number }) {
+  const { dragProps, dragStyle } = useElementDrag(slideId, e.key, scale);
+
   if (e.kind === "rect") {
     return (
       <div
+        {...dragProps}
         style={{
           ...box(e),
           background: e.fill ?? "transparent",
           border: e.line ? `${(e.lineWidthPt ?? 1) * PT_PX}px solid ${e.line}` : undefined,
           borderRadius: e.radius ? inPx(e.radius) : undefined,
           boxSizing: "border-box",
+          ...dragStyle,
         }}
       />
     );
   }
 
   if (e.kind === "image") {
-    return <img src={e.path} style={{ ...box(e), objectFit: "contain" }} alt="" />;
+    return <img src={e.path} {...dragProps} style={{ ...box(e), objectFit: "contain", ...dragStyle }} alt="" />;
   }
 
   if (e.kind === "table") {
     const fs = e.size * PT_PX;
     return (
       <table
+        {...dragProps}
         style={{
           ...box(e),
           borderCollapse: "collapse",
           fontFamily: `'${e.font}', sans-serif`,
           fontSize: fs,
           tableLayout: "fixed",
+          ...dragStyle,
         }}
       >
         <thead>
@@ -188,12 +255,14 @@ export function ElementView({ e, slideId }: { e: Element; slideId: string }) {
   // text
   return (
     <div
+      {...dragProps}
       style={{
         ...box(e),
         display: "flex",
         flexDirection: "column",
         justifyContent: justify[e.valign ?? "top"],
         overflow: "hidden",
+        ...dragStyle,
       }}
     >
       {e.paragraphs.map((p, i) => (
@@ -209,4 +278,15 @@ export function ElementView({ e, slideId }: { e: Element; slideId: string }) {
       ))}
     </div>
   );
+}
+
+// Commits an incremental position delta (inches) for one element to deck.json.
+// The server accumulates it onto any prior offset; HMR then repaints the move.
+async function commitMove(id: string, key: string, dx: number, dy: number): Promise<void> {
+  const res = await fetch("/api/slides/move", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, key, dx, dy }),
+  });
+  if (!res.ok) alert("Move failed. Is the dev server running?");
 }

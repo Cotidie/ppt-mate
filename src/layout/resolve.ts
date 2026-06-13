@@ -13,6 +13,18 @@ import { resolveClosing } from "./families/closing";
 export type { Element } from "./element";
 
 export function resolveSlide(slide: Slide, theme: Theme, footerText: string): Element[] {
+  const els = resolveByLayout(slide, theme, footerText);
+  const offsets = slide.offsets;
+  if (!offsets) return els;
+  // Apply user drag offsets (inches) once, here, so the preview and the PPTX
+  // exporter (both call resolveSlide) honor moves identically.
+  return els.map((el) => {
+    const o = offsets[el.key];
+    return o ? { ...el, x: el.x + o.dx, y: el.y + o.dy } : el;
+  });
+}
+
+function resolveByLayout(slide: Slide, theme: Theme, footerText: string): Element[] {
   switch (slide.layout) {
     case "cover":
       return resolveCover(slide, theme, footerText);

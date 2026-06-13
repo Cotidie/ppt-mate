@@ -23,6 +23,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/delete", handleDeleteSlide);
       server.middlewares.use("/api/slides/rename", handleRenameSlide);
       server.middlewares.use("/api/slides/edit", handleEditSlide);
+      server.middlewares.use("/api/slides/move", handleMoveSlide);
       server.middlewares.use("/api/chat/reset", handleChatReset);
       server.middlewares.use("/api/chat", handleChat);
       bindShutdown(server.httpServer);
@@ -221,6 +222,32 @@ function setByPath(root: any, path: string, value: unknown): void {
   }
   const leaf = parts[parts.length - 1];
   if (node != null && leaf in node) node[leaf] = value;
+}
+
+// Drag-to-move: accumulate a per-element position offset (inches) on the slide.
+// setByPath can't create the `offsets` map, so this has its own route. The client
+// sends an incremental delta; we add it to any prior offset so repeated drags
+// compose. Key is the resolver's stable element key (e.g. "title", "table").
+async function handleMoveSlide(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { id, key, dx, dy } = await readJsonBody(req);
+    await moveSlideElement(id, key, Number(dx), Number(dy));
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+async function moveSlideElement(id: string, key: string, dx: number, dy: number): Promise<void> {
+  if (!key || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
+  const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
+  const slide = deck.slides.find((s: { id: string }) => s.id === id);
+  if (!slide) return;
+  slide.offsets ??= {};
+  const prev = slide.offsets[key] ?? { dx: 0, dy: 0 };
+  slide.offsets[key] = { dx: prev.dx + dx, dy: prev.dy + dy };
+  await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
 }
 
 async function deleteSlideById(id: string): Promise<void> {

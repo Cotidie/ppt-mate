@@ -15,6 +15,7 @@ export function resolveClosing(s: Closing, t: Theme, footerText: string): Elemen
 
   els.push({
     kind: "text",
+    key: "title",
     x,
     y: cy,
     w,
@@ -32,6 +33,7 @@ export function resolveClosing(s: Closing, t: Theme, footerText: string): Elemen
     const h = 0.5;
     els.push({
       kind: "text",
+      key: "subtitle",
       x,
       y,
       w,
@@ -49,6 +51,7 @@ export function resolveClosing(s: Closing, t: Theme, footerText: string): Elemen
   const ruleW = 1.2;
   els.push({
     kind: "rect",
+    key: "rule",
     x: CANVAS.w / 2 - ruleW / 2,
     y,
     w: ruleW,

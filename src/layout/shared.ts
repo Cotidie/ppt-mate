@@ -37,6 +37,7 @@ export function header(
   if (kicker) {
     els.push({
       kind: "text",
+      key: "kicker",
       x,
       y,
       w,
@@ -55,6 +56,7 @@ export function header(
   const titleH = ptToIn(titleSize) * 2.2;
   els.push({
     kind: "text",
+    key: "title",
     x,
     y,
     w,
@@ -75,6 +77,7 @@ export function header(
 export function footer(t: Theme, text: string): TextEl {
   return {
     kind: "text",
+    key: "footer",
     x: t.margin.x,
     y: CANVAS.h - t.margin.bottom - t.layout.footerH,
     w: CANVAS.w - t.margin.x * 2,
@@ -93,7 +96,7 @@ export function bulletsElement(
   bullets: Bullet[],
   t: Theme,
   box: { x: number; y: number; w: number; h: number },
-  opts?: { size?: number; sourcePrefix?: string }
+  opts?: { size?: number; sourcePrefix?: string; keyName?: string }
 ): TextEl {
   const size = opts?.size ?? t.type.body;
   const prefix = opts?.sourcePrefix ?? "bullets";
@@ -107,6 +110,7 @@ export function bulletsElement(
   }));
   return {
     kind: "text",
+    key: opts?.keyName ?? "bullets",
     ...box,
     paragraphs,
     font: t.fonts.body,
@@ -125,9 +129,10 @@ export function noteBand(t: Theme, note: Span[]): Element[] {
   const h = 0.8;
   const y = CANVAS.h - t.margin.bottom - t.layout.footerH - 0.2 - h;
   return [
-    { kind: "rect", x, y, w, h, fill: t.colors.panel, radius: t.layout.cardRadius },
+    { kind: "rect", key: "note.rect", x, y, w, h, fill: t.colors.panel, radius: t.layout.cardRadius },
     {
       kind: "text",
+      key: "note",
       x: x + 0.3,
       y,
       w: w - 0.6,

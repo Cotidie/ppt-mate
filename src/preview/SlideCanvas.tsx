@@ -47,7 +47,7 @@ export function SlideCanvas({ slide, footerText }: { slide: Slide; footerText: s
           }}
         >
           {elements.map((e, i) => (
-            <ElementView key={i} e={e} slideId={slide.id} />
+            <ElementView key={i} e={e} slideId={slide.id} scale={scale} />
           ))}
         </div>
       </div>
