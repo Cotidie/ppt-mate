@@ -105,27 +105,30 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
     const startX = (e.clientX - rect.left) / sc;
     const startY = (e.clientY - rect.top) / sc;
     let moved = false;
-    let cur: Rect | null = null;
     // A bare press (no drag) deselects.
     setSelected(new Set());
+
+    // Every element the marquee currently covers, recomputed each move so the
+    // whole set shows its selection border LIVE during the drag (not only on
+    // release): marquee px -> inches, partial overlap.
+    const hitsFor = (cur: Rect): string[] => {
+      const m: Rect = { x: cur.x / PX_PER_IN, y: cur.y / PX_PER_IN, w: cur.w / PX_PER_IN, h: cur.h / PX_PER_IN };
+      return boxesRef.current.filter((b) => overlaps(b, m)).map((b) => b.key);
+    };
 
     const move = (ev: PointerEvent) => {
       const px = (ev.clientX - rect.left) / sc;
       const py = (ev.clientY - rect.top) / sc;
       if (!moved && Math.hypot((px - startX) * sc, (py - startY) * sc) < DRAG_THRESHOLD) return;
       moved = true;
-      cur = { x: Math.min(startX, px), y: Math.min(startY, py), w: Math.abs(px - startX), h: Math.abs(py - startY) };
+      const cur: Rect = { x: Math.min(startX, px), y: Math.min(startY, py), w: Math.abs(px - startX), h: Math.abs(py - startY) };
       setMarquee(cur);
+      setSelected(new Set(hitsFor(cur)));
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      if (moved && cur) {
-        // Marquee px -> inches; select every box that even partially overlaps.
-        const m: Rect = { x: cur.x / PX_PER_IN, y: cur.y / PX_PER_IN, w: cur.w / PX_PER_IN, h: cur.h / PX_PER_IN };
-        const hits = boxesRef.current.filter((b) => overlaps(b, m)).map((b) => b.key);
-        setSelected(new Set(hits));
-      }
+      // The selection is already live from the last move; just drop the overlay.
       setMarquee(null);
     };
     window.addEventListener("pointermove", move);
