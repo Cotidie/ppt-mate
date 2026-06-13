@@ -1,7 +1,7 @@
 // In-place rich-text editor for a single deck field. Renders the field's runs;
-// double-click enters edit mode with a TipTap single-paragraph editor and a
-// floating BubbleMenu (B/I/U/color/highlight). Enter or blur commits the
-// serialized Span[] to deck.json via /api/slides/edit; Escape discards.
+// a single click (in edit mode) enters edit mode with a TipTap single-paragraph
+// editor and a floating BubbleMenu (B/I/U/color/highlight). Enter or blur commits
+// the serialized Span[] to deck.json via /api/slides/edit; Escape discards.
 
 import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -26,25 +26,6 @@ const HIGHLIGHT = "#FFE08A";
 // Single-paragraph schema: no hard breaks, so Enter is free to commit.
 const OneLineDocument = Document.extend({ content: "paragraph" });
 
-type CharRange = { from: number; to: number };
-
-// The character offsets of the live selection within `root`, or null when the
-// selection is collapsed or escapes the element. Used to carry the word a fast
-// double-click selected in the read-mode span across the swap into the editor.
-function selectionOffsets(root: HTMLElement): CharRange | null {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  const range = sel.getRangeAt(0);
-  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
-  const pre = document.createRange();
-  pre.selectNodeContents(root);
-  pre.setEnd(range.startContainer, range.startOffset);
-  const from = pre.toString().length;
-  pre.setEnd(range.endContainer, range.endOffset);
-  const to = pre.toString().length;
-  return to > from ? { from, to } : null;
-}
-
 export function RichTextEditor({
   slideId,
   path,
@@ -58,24 +39,16 @@ export function RichTextEditor({
 }) {
   const mode = useMode();
   const [editing, setEditing] = useState(false);
-  // The word the entering double-click selected in the read-mode span, carried
-  // into the editor so it stays selected instead of collapsing to the end.
-  const initialSel = useRef<CharRange | null>(null);
 
   if (!editing) {
     return (
       <span
         className={"slide-editable" + (mode === "edit" ? " editable" : "")}
-        onDoubleClick={(e) => {
+        onClick={() => {
           if (mode !== "edit") return; // strict modes: only edit in edit mode
-          initialSel.current = selectionOffsets(e.currentTarget);
-          // Clear the browser's word selection now (offsets already captured):
-          // otherwise it paints, then vanishes during the read->edit swap, then
-          // the editor re-applies it - a visible blink. Now it appears once.
-          window.getSelection()?.removeAllRanges();
           setEditing(true);
         }}
-        title={mode === "edit" ? "Double-click to edit" : undefined}
+        title={mode === "edit" ? "Click to edit" : undefined}
       >
         {children}
       </span>
@@ -86,7 +59,6 @@ export function RichTextEditor({
       slideId={slideId}
       path={path}
       spans={spans}
-      initialSel={initialSel.current}
       onClose={() => setEditing(false)}
     />
   );
@@ -96,13 +68,11 @@ function EditorInstance({
   slideId,
   path,
   spans,
-  initialSel,
   onClose,
 }: {
   slideId: string;
   path: string;
   spans: Span[];
-  initialSel: CharRange | null;
   onClose: () => void;
 }) {
   // Guards the field against more than one finalize. Enter, blur, and a
@@ -124,18 +94,7 @@ function EditorInstance({
       Highlight.configure({ multicolor: true }),
     ],
     content: spansToDoc(spans),
-    // When a double-click selected a word, restore it in onCreate; otherwise
-    // drop the caret at the end.
-    autofocus: initialSel ? false : "end",
-    onCreate({ editor }) {
-      if (!initialSel) return;
-      // Single paragraph: char offset n maps to ProseMirror position n + 1
-      // (the paragraph node opens at 0, text starts at 1).
-      const max = editor.state.doc.content.size;
-      const from = Math.min(initialSel.from + 1, max);
-      const to = Math.min(initialSel.to + 1, max);
-      editor.chain().focus().setTextSelection({ from, to }).run();
-    },
+    autofocus: "end",
     immediatelyRender: true,
     editorProps: {
       handleKeyDown(_view, event) {
