@@ -216,6 +216,7 @@ function Paragraph({
   lineHeightPt?: number;
 }) {
   const size = (p.size ?? defSize) * PT_PX;
+  const isBullet = !!p.bullet;
   const style: CSSProperties = {
     margin: 0,
     marginBottom: p.spaceAfterPt ? p.spaceAfterPt * PT_PX : 0,
@@ -227,24 +228,30 @@ function Paragraph({
     // Honor the element-level align (e.g. centered closing title, table verdict),
     // matching the exporter which passes e.align. Paragraph align still wins.
     textAlign: p.align ?? defAlign ?? "left",
-    paddingLeft: p.bullet ? 16 + (p.indentLevel ?? 0) * 18 : 0,
-    textIndent: p.bullet ? -16 : 0,
+    // Bullets lay out as a flex row (marker + content column). The content is a
+    // block (the always-mounted ProseMirror editor), so the old inline
+    // hanging-indent trick can't apply - flex keeps the marker beside the text
+    // and wraps wrapped lines under the content, not the bullet.
+    ...(isBullet
+      ? { display: "flex", alignItems: "baseline", paddingLeft: (p.indentLevel ?? 0) * 18 }
+      : null),
   };
-  const bullet = p.bullet ? <span style={{ color: defColor }}>•&nbsp;</span> : null;
+  const marker = isBullet ? (
+    <span style={{ color: defColor, flex: "0 0 auto", marginRight: 6 }}>•</span>
+  ) : null;
 
-  if (p.source) {
-    return (
-      <p style={style} data-source={p.source}>
-        {bullet}
-        <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)} />
-      </p>
-    );
-  }
+  // The content slot: editable (rich text) or static runs. Under a bullet it's a
+  // flex:1 column so the block editor takes the remaining width and wraps there.
+  const content = p.source ? (
+    <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)} />
+  ) : (
+    renderRuns(p.runs)
+  );
 
   return (
-    <p style={style}>
-      {bullet}
-      {renderRuns(p.runs)}
+    <p style={style} data-source={p.source}>
+      {marker}
+      {isBullet ? <span style={{ flex: 1, minWidth: 0 }}>{content}</span> : content}
     </p>
   );
 }
