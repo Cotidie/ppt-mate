@@ -196,29 +196,29 @@ async function streamReply(message: string, onEvent: (ev: ChatEvent) => void): P
   }
 }
 
-// Turns one SSE frame into a ChatEvent. `message` frames carry a line of the
-// CLI's NDJSON; we pull assistant text deltas out of it. `stderr` is ignored.
+// Turns one SSE frame into a ChatEvent. The server sends clean events now:
+// `delta` carries a JSON-encoded text chunk, `error` a JSON-encoded message,
+// `done` ends the turn.
 function parseFrame(frame: string): ChatEvent | null {
   const event = matchField(frame, "event") ?? "message";
   const data = matchField(frame, "data") ?? "";
-  if (event === "done") return null;
-  if (event === "error") return { kind: "error", text: data || "Claude Code failed to start." };
-  if (event === "stderr") return null; // diagnostics only; ignore in the UI
-  return parseClaudeLine(data);
-}
-
-function parseClaudeLine(line: string): ChatEvent | null {
-  let json: any;
-  try {
-    json = JSON.parse(line);
-  } catch {
-    return null;
+  if (event === "delta") {
+    try {
+      return { kind: "delta", text: JSON.parse(data) };
+    } catch {
+      return null;
+    }
   }
-  if (json.type === "stream_event" && json.event?.type === "content_block_delta") {
-    const delta = json.event.delta;
-    if (delta?.type === "text_delta") return { kind: "delta", text: delta.text };
+  if (event === "error") {
+    let text = data;
+    try {
+      text = JSON.parse(data);
+    } catch {
+      /* fall back to raw */
+    }
+    return { kind: "error", text: text || "Claude Code failed to start." };
   }
-  return null;
+  return null; // done / unknown
 }
 
 function matchField(frame: string, field: string): string | undefined {
