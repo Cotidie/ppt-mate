@@ -1,7 +1,9 @@
-// In-place rich-text editor for a single deck field. Renders the field's runs;
-// a single click (in edit mode) enters edit mode with a TipTap single-paragraph
-// editor and a floating BubbleMenu (B/I/U/color/highlight). Enter or blur commits
-// the serialized Span[] to deck.json via /api/slides/edit; Escape discards.
+// In-place rich-text editor for a single deck field. The TipTap editor is always
+// mounted, rendering the field's runs; it is editable only in "edit" mode, so a
+// click lands the caret natively where pressed and a drag selects natively - no
+// selection has to be carried across a read->edit DOM swap. Enter (or blur)
+// commits the serialized Span[] to deck.json via /api/slides/edit; Escape
+// reverts to the last committed value.
 
 import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -26,93 +28,23 @@ const HIGHLIGHT = "#FFE08A";
 // Single-paragraph schema: no hard breaks, so Enter is free to commit.
 const OneLineDocument = Document.extend({ content: "paragraph" });
 
-type CharRange = { from: number; to: number };
-
-// The character offsets of the live selection within `root`, or null when there
-// is no selection or it escapes the element. Carries the read-mode selection
-// across the swap into the editor: a drag-select keeps its range, and a plain
-// click keeps its caret (a collapsed selection, from === to) at the click point
-// instead of jumping to the end.
-function selectionOffsets(root: HTMLElement): CharRange | null {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  const range = sel.getRangeAt(0);
-  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
-  const pre = document.createRange();
-  pre.selectNodeContents(root);
-  pre.setEnd(range.startContainer, range.startOffset);
-  const from = pre.toString().length;
-  pre.setEnd(range.endContainer, range.endOffset);
-  const to = pre.toString().length;
-  return { from, to };
-}
-
 export function RichTextEditor({
   slideId,
   path,
   spans,
-  children,
 }: {
   slideId: string;
   path: string;
   spans: Span[];
-  children: React.ReactNode; // read-only run rendering, shown when not editing
 }) {
   const mode = useMode();
-  const [editing, setEditing] = useState(false);
-  // The read-mode selection (a drag range, or a click's collapsed caret),
-  // carried into the editor so the cursor lands exactly where clicked instead
-  // of jumping to the end.
-  const initialSel = useRef<CharRange | null>(null);
+  const editable = mode === "edit";
+  const [focused, setFocused] = useState(false);
 
-  if (!editing) {
-    return (
-      <span
-        className={"slide-editable" + (mode === "edit" ? " editable" : "")}
-        onClick={(e) => {
-          if (mode !== "edit") return; // strict modes: only edit in edit mode
-          initialSel.current = selectionOffsets(e.currentTarget);
-          // Clear the browser's selection now (offsets already captured):
-          // otherwise it paints, then vanishes during the read->edit swap, then
-          // the editor re-applies it - a visible blink. Now it appears once.
-          window.getSelection()?.removeAllRanges();
-          setEditing(true);
-        }}
-        title={mode === "edit" ? "Click to edit" : undefined}
-      >
-        {children}
-      </span>
-    );
-  }
-  return (
-    <EditorInstance
-      slideId={slideId}
-      path={path}
-      spans={spans}
-      initialSel={initialSel.current}
-      onClose={() => setEditing(false)}
-    />
-  );
-}
-
-function EditorInstance({
-  slideId,
-  path,
-  spans,
-  initialSel,
-  onClose,
-}: {
-  slideId: string;
-  path: string;
-  spans: Span[];
-  initialSel: CharRange | null;
-  onClose: () => void;
-}) {
-  // Guards the field against more than one finalize. Enter, blur, and a
-  // post-close blur can all race; whichever lands first wins, the rest no-op.
-  // It also makes Escape a true discard: a trailing blur after Escape sees the
-  // field already finalized and never commits.
-  const finalized = useRef(false);
+  // The last value this editor is in sync with, as a normalized doc-JSON string.
+  // Guards both directions: skip a no-op commit, and skip clobbering the editor
+  // with an incoming prop that already matches what it shows.
+  const synced = useRef(JSON.stringify(spansToDoc(spans)));
 
   const editor = useEditor({
     extensions: [
@@ -127,116 +59,116 @@ function EditorInstance({
       Highlight.configure({ multicolor: true }),
     ],
     content: spansToDoc(spans),
-    // Restore the carried read-mode selection/caret in onCreate; only fall back
-    // to the end when there was none (e.g. focus entered without a click).
-    autofocus: initialSel ? false : "end",
-    onCreate({ editor }) {
-      if (!initialSel) return;
-      // Single paragraph: char offset n maps to ProseMirror position n + 1
-      // (the paragraph node opens at 0, text starts at 1).
-      const max = editor.state.doc.content.size;
-      const from = Math.min(initialSel.from + 1, max);
-      const to = Math.min(initialSel.to + 1, max);
-      editor.chain().focus().setTextSelection({ from, to }).run();
-    },
-    immediatelyRender: true,
-    editorProps: {
-      handleKeyDown(_view, event) {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          // Defer so the editor state is fully settled before commit reads it.
-          setTimeout(doCommit, 0);
-          return true;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          discard();
-          return true;
-        }
-        return false;
-      },
+    editable,
+    onFocus: () => setFocused(true),
+    onBlur: () => {
+      setFocused(false);
+      commit();
     },
   });
 
-  function doCommit() {
-    if (finalized.current || !editor || editor.isDestroyed) return;
-    finalized.current = true;
+  // Mode drives editability; toggling is a deliberate toolbar action, never
+  // mid-gesture, so there is no selection race.
+  useEffect(() => {
+    editor?.setEditable(editable);
+  }, [editor, editable]);
+
+  // Pull external changes (HMR after a commit, or the chat agent editing
+  // deck.json) into the editor - but never while the user is typing in it, and
+  // never when the incoming value already matches what's shown.
+  const incoming = JSON.stringify(spansToDoc(spans));
+  useEffect(() => {
+    if (!editor || focused) return;
+    if (incoming === synced.current) return;
+    editor.commands.setContent(JSON.parse(incoming) as PMDoc, { emitUpdate: false });
+    synced.current = incoming;
+  }, [editor, incoming, focused]);
+
+  function commit() {
+    if (!editor) return;
     const next = docToSpans(editor.getJSON() as unknown as PMDoc);
-    onClose();
+    const nextJSON = JSON.stringify(spansToDoc(next));
+    if (nextJSON === synced.current) return; // unchanged
+    synced.current = nextJSON;
     // The footer is the deck-wide meta string, not a slide field: flatten the
     // edited runs to plain text and commit it via its own route.
     if (path === FOOTER_SOURCE) void commitFooter(next);
     else void commitSpans(slideId, path, next);
   }
 
-  function discard() {
-    if (finalized.current) return;
-    finalized.current = true;
-    onClose();
+  function onKeyDown(e: React.KeyboardEvent) {
+    // Focus is inside the editor, so swallow keys here: keeps arrows/PageUp from
+    // flipping slides while typing (App's nav listener is on window).
+    e.stopPropagation();
+    if (!editor) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      editor.commands.blur(); // single-paragraph schema; blur is the commit path
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      editor.commands.setContent(JSON.parse(synced.current) as PMDoc, { emitUpdate: false });
+      editor.commands.blur();
+    }
   }
 
-  // Keep arrow keys from flipping slides while the editor is focused.
-  useEffect(() => {
-    const stop = (e: KeyboardEvent) => e.stopPropagation();
-    window.addEventListener("keydown", stop, true);
-    return () => window.removeEventListener("keydown", stop, true);
-  }, []);
-
-  if (!editor) return null;
-
   return (
-    <span className="slide-editable editing">
-      <BubbleMenu editor={editor} className="rt-bubble">
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => editor.chain().focus().toggleBold().run()}
-          className={editor.isActive("bold") ? "on" : ""}
-          title="Bold"
-        >
-          <b>B</b>
-        </button>
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => editor.chain().focus().toggleItalic().run()}
-          className={editor.isActive("italic") ? "on" : ""}
-          title="Italic"
-        >
-          <i>I</i>
-        </button>
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => editor.chain().focus().toggleUnderline().run()}
-          className={editor.isActive("underline") ? "on" : ""}
-          title="Underline"
-        >
-          <u>U</u>
-        </button>
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => editor.chain().focus().setColor(COLOR).run()}
-          title="Text color"
-        >
-          A
-        </button>
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => editor.chain().focus().unsetColor().run()}
-          title="Clear color"
-        >
-          A&times;
-        </button>
-        <button
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() =>
-            editor.chain().focus().toggleHighlight({ color: HIGHLIGHT }).run()
-          }
-          className={editor.isActive("highlight") ? "on" : ""}
-          title="Highlight"
-        >
-          H
-        </button>
-      </BubbleMenu>
-      <EditorContent editor={editor} onBlur={doCommit} />
+    <span
+      className={
+        "slide-editable" + (editable ? " editable" : "") + (focused ? " editing" : "")
+      }
+      onKeyDown={onKeyDown}
+    >
+      {editor && focused && (
+        <BubbleMenu editor={editor} className="rt-bubble">
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            className={editor.isActive("bold") ? "on" : ""}
+            title="Bold"
+          >
+            <b>B</b>
+          </button>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            className={editor.isActive("italic") ? "on" : ""}
+            title="Italic"
+          >
+            <i>I</i>
+          </button>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
+            className={editor.isActive("underline") ? "on" : ""}
+            title="Underline"
+          >
+            <u>U</u>
+          </button>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => editor.chain().focus().setColor(COLOR).run()}
+            title="Text color"
+          >
+            A
+          </button>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => editor.chain().focus().unsetColor().run()}
+            title="Clear color"
+          >
+            A&times;
+          </button>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => editor.chain().focus().toggleHighlight({ color: HIGHLIGHT }).run()}
+            className={editor.isActive("highlight") ? "on" : ""}
+            title="Highlight"
+          >
+            H
+          </button>
+        </BubbleMenu>
+      )}
+      <EditorContent editor={editor} />
     </span>
   );
 }

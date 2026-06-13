@@ -114,11 +114,7 @@ function renderRuns(runs: Run[]) {
 // One table cell's content: editable when it carries a source, else plain runs.
 function CellContent({ slideId, source, runs }: { slideId: string; source?: string; runs: Run[] }) {
   if (!source) return <>{renderRuns(runs)}</>;
-  return (
-    <RichTextEditor slideId={slideId} path={source} spans={asSpans(runs)}>
-      {renderRuns(runs)}
-    </RichTextEditor>
-  );
+  return <RichTextEditor slideId={slideId} path={source} spans={asSpans(runs)} />;
 }
 
 function Paragraph({
@@ -159,9 +155,7 @@ function Paragraph({
     return (
       <p style={style} data-source={p.source}>
         {bullet}
-        <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)}>
-          {renderRuns(p.runs)}
-        </RichTextEditor>
+        <RichTextEditor slideId={slideId} path={p.source} spans={asSpans(p.runs)} />
       </p>
     );
   }
