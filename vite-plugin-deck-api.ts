@@ -452,6 +452,9 @@ class ClaudeSession {
         strictMcpConfig: true,
         disallowedTools: ["WebFetch", "WebSearch"],
         mcpServers: { deck: deckMcp },
+        // Repo-bundled skills under .claude/skills/. Explicit list (not 'all') so
+        // only project skills load - a user-scope skill can't leak in.
+        skills: ["fix-layout"],
       },
     });
     this.input = input;
