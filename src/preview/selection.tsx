@@ -22,7 +22,7 @@ import {
   nearGeom,
   type Geom,
 } from "./gesture";
-import { snapMove, type Guide } from "./snap";
+import { snapMove, snapResize, type Guide } from "./snap";
 
 type Box = Geom & { key: string };
 type Rect = { x: number; y: number; w: number; h: number };
@@ -44,6 +44,9 @@ export interface SelectionApi {
   // returns the correction to add to the in-flight delta. `bypass` (Alt held)
   // skips snapping and clears guides. Used by the single-move hook and group move.
   snapMoveBox(moving: Geom, exclude: Iterable<string>, scale: number, bypass: boolean): { dx: number; dy: number };
+  // Snap a RESIZE candidate box: only the edges the handle `dir` drives snap to
+  // the other elements' lines. Sets guides, returns the snapped box. Bypass clears.
+  snapResizeBox(cand: Geom, dir: string, exclude: Iterable<string>, scale: number, bypass: boolean): Geom;
   clearGuides(): void;
 }
 
@@ -57,6 +60,7 @@ const NOOP: SelectionApi = {
   beginMarquee: () => {},
   beginGroupMove: () => {},
   snapMoveBox: () => ({ dx: 0, dy: 0 }),
+  snapResizeBox: (cand) => cand,
   clearGuides: () => {},
 };
 
@@ -129,6 +133,19 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
     const r = snapMove(moving, others, tol);
     setGuides(r.guides);
     return { dx: r.dx, dy: r.dy };
+  }
+
+  function snapResizeBox(cand: Geom, dir: string, exclude: Iterable<string>, sc: number, bypass: boolean): Geom {
+    if (bypass) {
+      setGuides([]);
+      return cand;
+    }
+    const ex = new Set(exclude);
+    const others = boxesRef.current.filter((b) => !ex.has(b.key));
+    const tol = SNAP_PX / (PX_PER_IN * sc);
+    const r = snapResize(cand, dir, others, tol);
+    setGuides(r.guides);
+    return r.box;
   }
 
   function beginMarquee(e: ReactPointerEvent, sc: number) {
@@ -238,6 +255,7 @@ export function useSelectionState(elements: Element[], slideId: string, scale: n
     beginMarquee,
     beginGroupMove,
     snapMoveBox,
+    snapResizeBox,
     clearGuides,
   };
 }
