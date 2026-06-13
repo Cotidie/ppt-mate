@@ -260,6 +260,7 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
   return (
     <div
       {...dragProps}
+      className="text-box"
       style={{
         ...box(e),
         display: "flex",

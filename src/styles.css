@@ -11,43 +11,47 @@ body {
   color: #e7eaf0;
 }
 
-/* Inline-editable slide text. Subtle outline on hover hints it's editable;
-   double-click turns on the contentEditable state (.editing). */
-.slide-editable {
+/* Each text element is a rectangular text box. The hover/edit affordance lives
+   on the box (a real rectangle), not on the inline text, so it never traces the
+   wrapped line boxes into a zigzag. */
+.text-box {
   border-radius: 3px;
   outline: 1px dashed transparent;
   outline-offset: 2px;
+  transition: outline-color 0.12s;
+}
+
+.text-box:hover {
+  outline-color: rgba(59, 111, 212, 0.6);
+}
+
+.text-box:has(.slide-editable.editing) {
+  outline: 2px solid #3b6fd4;
+}
+
+/* Inline-editable text inside a text box. No box-shaped outline here (that's the
+   .text-box's job); just the text cursor and a faint tint on the field being
+   edited so the active field reads inside a multi-field box. */
+.slide-editable {
   cursor: text;
-  transition: outline-color 0.12s, background 0.12s;
   /* Match ProseMirror's whitespace model so text doesn't reflow on entering
      edit mode. Read mode otherwise collapses consecutive spaces (white-space:
      normal) while the editor preserves them, shifting e.g. the footer's double
      space. break-spaces also matches the PPTX export, which keeps the spaces. */
   white-space: break-spaces;
-}
-
-.slide-editable:hover {
-  outline-color: rgba(59, 111, 212, 0.6);
+  transition: background 0.12s;
 }
 
 .slide-editable.editing {
-  outline: 2px solid #3b6fd4;
   background: rgba(59, 111, 212, 0.08);
 }
 
 /* While editing, lift the whole slide element above siblings painted later in
-   DOM order (e.g. the closing rule/footer) so the floating BubbleMenu isn't
-   covered. Stage children are already position:absolute. */
+   DOM order (e.g. the closing rule/footer) and stop clipping it, so the floating
+   BubbleMenu isn't covered or cropped by the box's overflow:hidden. Stage
+   children are already position:absolute. */
 .stage > *:has(.slide-editable.editing) {
   z-index: 5;
-}
-
-/* Stop clipping the editable element on hover/edit: text elements set
-   overflow:hidden inline, which crops the hover/edit outline on the top-left
-   (where the editable sits flush with the element box) and the floating
-   BubbleMenu when editing. */
-.stage > *:has(.slide-editable:hover),
-.stage > *:has(.slide-editable.editing) {
   overflow: visible !important;
 }
 
