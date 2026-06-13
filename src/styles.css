@@ -19,6 +19,11 @@ body {
   outline-offset: 2px;
   cursor: text;
   transition: outline-color 0.12s, background 0.12s;
+  /* Match ProseMirror's whitespace model so text doesn't reflow on entering
+     edit mode. Read mode otherwise collapses consecutive spaces (white-space:
+     normal) while the editor preserves them, shifting e.g. the footer's double
+     space. break-spaces also matches the PPTX export, which keeps the spaces. */
+  white-space: break-spaces;
 }
 
 .slide-editable:hover {
