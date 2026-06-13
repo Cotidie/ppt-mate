@@ -22,8 +22,26 @@ import { FOOTER_SOURCE } from "../model/deck";
 import { spansToDoc, docToSpans, type PMDoc } from "./richtext";
 import { useMode } from "./mode";
 
-const COLOR = "#D64545";
-const HIGHLIGHT = "#FFE08A";
+// Swatch palettes for the bubble's color controls. The first entry (v: null) is
+// the reset: Default removes the text color, None removes the highlight.
+type Swatch = { v: string | null; title: string };
+const TEXT_SWATCHES: Swatch[] = [
+  { v: null, title: "Default" },
+  { v: "#1A1A2E", title: "Ink" },
+  { v: "#D64545", title: "Red" },
+  { v: "#E8893D", title: "Orange" },
+  { v: "#2E9E5B", title: "Green" },
+  { v: "#3B6FD4", title: "Blue" },
+  { v: "#7048E8", title: "Purple" },
+];
+const HIGHLIGHT_SWATCHES: Swatch[] = [
+  { v: null, title: "None" },
+  { v: "#FFE08A", title: "Yellow" },
+  { v: "#B7E4C7", title: "Green" },
+  { v: "#A5D8FF", title: "Blue" },
+  { v: "#FFC9C9", title: "Pink" },
+  { v: "#E5DBFF", title: "Lavender" },
+];
 
 // Single-paragraph schema: no hard breaks, so Enter is free to commit.
 const OneLineDocument = Document.extend({ content: "paragraph" });
@@ -40,6 +58,8 @@ export function RichTextEditor({
   const mode = useMode();
   const editable = mode === "edit";
   const [focused, setFocused] = useState(false);
+  // Which color palette is open in the bubble ("text" | "highlight" | none).
+  const [picker, setPicker] = useState<"text" | "highlight" | null>(null);
 
   // The last value this editor is in sync with, as a normalized doc-JSON string.
   // Guards both directions: skip a no-op commit, and skip clobbering the editor
@@ -63,6 +83,7 @@ export function RichTextEditor({
     onFocus: () => setFocused(true),
     onBlur: () => {
       setFocused(false);
+      setPicker(null);
       commit();
     },
   });
@@ -120,52 +141,84 @@ export function RichTextEditor({
     >
       {editor && focused && (
         <BubbleMenu editor={editor} className="rt-bubble">
-          <button
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleBold().run()}
-            className={editor.isActive("bold") ? "on" : ""}
-            title="Bold"
-          >
-            <b>B</b>
-          </button>
-          <button
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-            className={editor.isActive("italic") ? "on" : ""}
-            title="Italic"
-          >
-            <i>I</i>
-          </button>
-          <button
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleUnderline().run()}
-            className={editor.isActive("underline") ? "on" : ""}
-            title="Underline"
-          >
-            <u>U</u>
-          </button>
-          <button
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => editor.chain().focus().setColor(COLOR).run()}
-            title="Text color"
-          >
-            A
-          </button>
-          <button
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => editor.chain().focus().unsetColor().run()}
-            title="Clear color"
-          >
-            A&times;
-          </button>
-          <button
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => editor.chain().focus().toggleHighlight({ color: HIGHLIGHT }).run()}
-            className={editor.isActive("highlight") ? "on" : ""}
-            title="Highlight"
-          >
-            H
-          </button>
+          <div className="rt-row">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              className={editor.isActive("bold") ? "on" : ""}
+              title="Bold"
+            >
+              <b>B</b>
+            </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              className={editor.isActive("italic") ? "on" : ""}
+              title="Italic"
+            >
+              <i>I</i>
+            </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editor.chain().focus().toggleUnderline().run()}
+              className={editor.isActive("underline") ? "on" : ""}
+              title="Underline"
+            >
+              <u>U</u>
+            </button>
+            <span className="rt-sep" />
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setPicker((p) => (p === "text" ? null : "text"))}
+              className={picker === "text" ? "on" : ""}
+              title="Font color"
+            >
+              <span
+                className="rt-glyph"
+                style={{ borderBottom: `3px solid ${editor.getAttributes("textStyle").color ?? "transparent"}` }}
+              >
+                A
+              </span>
+            </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setPicker((p) => (p === "highlight" ? null : "highlight"))}
+              className={picker === "highlight" ? "on" : ""}
+              title="Highlight color"
+            >
+              <span
+                className="rt-glyph"
+                style={{ borderBottom: `3px solid ${editor.getAttributes("highlight").color ?? "transparent"}` }}
+              >
+                H
+              </span>
+            </button>
+          </div>
+          {picker && (
+            <div className="rt-swatches">
+              {(picker === "text" ? TEXT_SWATCHES : HIGHLIGHT_SWATCHES).map((s) => {
+                const current =
+                  picker === "text"
+                    ? (editor.getAttributes("textStyle").color ?? null)
+                    : (editor.getAttributes("highlight").color ?? null);
+                return (
+                  <button
+                    key={s.v ?? "reset"}
+                    className={"rt-swatch" + (s.v === null ? " reset" : "") + (current === s.v ? " sel" : "")}
+                    style={s.v ? { background: s.v } : undefined}
+                    title={s.title}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      const c = editor.chain().focus();
+                      if (picker === "text") s.v ? c.setColor(s.v).run() : c.unsetColor().run();
+                      else s.v ? c.setHighlight({ color: s.v }).run() : c.unsetHighlight().run();
+                      setPicker(null);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
         </BubbleMenu>
       )}
       <EditorContent editor={editor} />
