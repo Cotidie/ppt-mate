@@ -235,7 +235,13 @@
         {
           "text": "Reduce sample size to balance cost and feasibility."
         }
-      ]
+      ],
+      "overrides": {
+        "note": {
+          "dx": 3.885780586188048e-16,
+          "dy": -2.7755575615628914e-17
+        }
+      }
     },
     {
       "id": "small-models",
