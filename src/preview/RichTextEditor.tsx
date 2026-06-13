@@ -188,7 +188,8 @@ export function RichTextEditor({
       if (picker === "highlight") chain.unsetHighlight().run();
       else chain.unsetColor().run();
     }
-    closePicker();
+    // Stay open so the user can keep trying colors; close via the A/H toggle or
+    // by clicking outside the bubble.
   }
 
   // Close from inside the bubble: keep editing (refocus the saved range).
@@ -300,10 +301,7 @@ export function RichTextEditor({
                         style={{ background: s.v as string }}
                         title={s.title}
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          applyHex(s.v as string);
-                          closePicker();
-                        }}
+                        onClick={() => applyHex(s.v as string)}
                       />
                     ))}
                 </div>
