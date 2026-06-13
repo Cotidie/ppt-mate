@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import type { Deck, RichText } from "../model/deck";
-import { useAgentContext, getPendingVisual, type UiContext } from "./agentContext";
+import { useAgentContext, getPendingVisual, clearPendingVisual, type UiContext } from "./agentContext";
 import deckJson from "../../deck.json";
 
 const deck = deckJson as Deck;
@@ -109,6 +109,18 @@ export function AgentContextBar() {
         {visual && (
           <span className="ctx-chip" title={`region ${Math.round(visual.rect.w)}x${Math.round(visual.rect.h)}px attached to your next message`}>
             📷 region
+            <span
+              className="ctx-chip-x"
+              role="button"
+              aria-label="Clear visual selection"
+              title="Clear visual selection"
+              onClick={(e) => {
+                e.stopPropagation();
+                clearPendingVisual();
+              }}
+            >
+              ✕
+            </span>
           </span>
         )}
         {issues.length > 0 && (

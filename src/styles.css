@@ -892,6 +892,45 @@ body.gesture-active * {
   background: rgba(59, 111, 212, 0.12);
   pointer-events: none;
 }
+/* The captured region stays marked until sent or cleared: solid (vs the dashed
+   live drag), with a clear button. The box ignores pointers; the button doesn't. */
+.visual-rect.captured {
+  border-style: solid;
+  background: rgba(59, 111, 212, 0.08);
+}
+.visual-rect-x {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: #3b6fd4;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.visual-rect-x:hover {
+  background: #5384e0;
+}
+
+/* Clear affordance inside the 📷 region chip. */
+.ctx-chip-x {
+  margin-left: 5px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.ctx-chip-x:hover {
+  opacity: 1;
+}
 
 .chat-input-row {
   display: flex;

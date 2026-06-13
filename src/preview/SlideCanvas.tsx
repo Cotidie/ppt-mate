@@ -8,7 +8,7 @@ import { theme, PX_PER_IN } from "../theme/theme";
 import { ElementView } from "./Element";
 import { SelectionContext, useSelectionState } from "./selection";
 import { useMode } from "./mode";
-import { reportContext, setPendingVisual, type RenderFact, type TextSel, type Rect } from "./agentContext";
+import { reportContext, setPendingVisual, clearPendingVisual, useAgentContext, type RenderFact, type TextSel, type Rect } from "./agentContext";
 import * as htmlToImage from "html-to-image";
 
 const STAGE_W = theme.canvas.w * PX_PER_IN; // 1280
@@ -49,6 +49,24 @@ export function SlideCanvas({
 
   const mode = useMode();
   const selection = useSelectionState(elements, slide.id, scale);
+  // The captured region pending on the next chat turn (unscaled stage px), kept
+  // marked on the slide until sent or cleared.
+  const capturedRect = useAgentContext().visual?.rect ?? null;
+
+  // Escape clears a pending captured region (cancelling an in-progress drag is
+  // handled inside beginVisual). Ignored while a text editor is focused so it
+  // doesn't steal Escape from RichTextEditor's revert.
+  useEffect(() => {
+    if (!capturedRect) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t?.isContentEditable || t?.closest?.(".slide-editable")) return;
+      clearPendingVisual();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [capturedRect]);
 
   // The slide context picked for Claude with the Select tool: one element, or a
   // text range. Persists across mode switches (only Select-mode actions change
@@ -159,19 +177,32 @@ export function SlideCanvas({
       w: Math.abs(cur.x - start.x),
       h: Math.abs(cur.y - start.y),
     });
+    let cancelled = false;
+    const teardown = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("keydown", onKey);
+    };
     const move = (ev: PointerEvent) => {
       cur = toStage(ev.clientX, ev.clientY);
       setVisualRect(rectOf());
     };
     const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      teardown();
       const r = rectOf();
       setVisualRect(null);
-      if (r.w > 8 && r.h > 8) void captureRegion(stageEl, r);
+      if (!cancelled && r.w > 8 && r.h > 8) void captureRegion(stageEl, r);
+    };
+    // Escape mid-drag cancels without capturing.
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      cancelled = true;
+      teardown();
+      setVisualRect(null);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("keydown", onKey);
   };
 
   // The CSS transform is visual-only and does not shrink the layout box, so the
@@ -222,6 +253,27 @@ export function SlideCanvas({
               className="visual-rect"
               style={{ left: visualRect.x, top: visualRect.y, width: visualRect.w, height: visualRect.h }}
             />
+          )}
+          {/* The captured region stays marked (any mode) until sent or cleared. The
+              box ignores pointers; only its clear button is interactive. */}
+          {!visualRect && capturedRect && (
+            <div
+              className="visual-rect captured"
+              style={{ left: capturedRect.x, top: capturedRect.y, width: capturedRect.w, height: capturedRect.h }}
+            >
+              <button
+                className="visual-rect-x"
+                title="Clear visual selection"
+                aria-label="Clear visual selection"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  clearPendingVisual();
+                }}
+              >
+                ✕
+              </button>
+            </div>
           )}
           {/* Alignment guides (inches -> unscaled stage px). An x-guide is a thin
               vertical line at `at` spanning start..end; a y-guide the horizontal
