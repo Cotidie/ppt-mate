@@ -17,12 +17,20 @@ fix layout by editing the model.
 
 - `mcp__deck__get_active_slide` - the slide's JSON **and** its resolved elements
   with positions/sizes in inches, **and** the measured render issues (text
-  overflowing its box, elements off-canvas) the browser reported.
+  overflowing, elements off-canvas) the browser reported.
 - `mcp__deck__get_design_system` - margins, type sizes, colors, layout spacing
   (the `theme.json` tokens) and the canvas size.
 - `mcp__deck__get_selection` - if the user selected an element or attached a visual
   crop of a region, start there.
 - If the user attached an image crop, inspect it pixel-by-pixel for the issues below.
+
+**The reported render flags are hints, not ground truth — never stop at them.**
+They can be masked: e.g. a geometry `override` that enlarges a text element's box
+means its text no longer exceeds *its own* box, so a naive check sees no overflow,
+yet the text still spills past the card/container it visually sits in. Always do
+your own geometric pass (step 2) over the resolved boxes, and trust the rendered
+image / visible result over any flag. If a slide looks wrong but nothing is
+flagged, believe your eyes and the geometry.
 
 ## 2. Checklist (find issues)
 
@@ -31,6 +39,13 @@ fixing anything.
 
 - **Overflow**: an element's rendered height exceeds its box (the render facts flag
   this). Text spilling past a card / off the slide.
+- **Containment** (check geometrically, don't trust flags): for every element,
+  verify its resolved box stays inside whatever it visually sits within. In
+  particular a card's body/text must stay inside that card's background rect -
+  i.e. `body.y + body.h <= cardRect.y + cardRect.h` (and the same for x/width).
+  An `override` on the text but not on the card rect is the classic way text ends
+  up poking out the bottom of a card while nothing is flagged. Compare each
+  sibling pair (e.g. all `card.N.*`) this way.
 - **Off-canvas**: an element's box extends past 0..13.333 in x or 0..7.5 in y.
 - **Overlap / collision**: two boxes overlap when they shouldn't; the footer or a
   citation colliding with content above it.
@@ -63,6 +78,8 @@ In rough order of preference:
    when the size is globally wrong.
 3. **Geometry override** - set/adjust the slide's `overrides[<elementKey>]`
    (`dx/dy/dw/dh`, inches) to move/resize one element. Use for a one-off nudge.
+   Note a *stale* override can be the cause (e.g. a text box enlarged past its
+   card): removing or shrinking that override is often the fix, not adding one.
 4. **Restructure / change layout** - if the content simply doesn't fit the family
    (e.g. too many bullets for `body`), move to a roomier layout or split the slide.
 

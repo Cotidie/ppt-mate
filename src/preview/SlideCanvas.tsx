@@ -126,13 +126,36 @@ export function SlideCanvas({
       const facts: Record<string, RenderFact> = {};
       const eps = 0.02;
       const linePx = theme.layout.lineHeightPt * (96 / 72);
+      // Rect elements act as containers (e.g. a card background). A text element's
+      // overflow is measured against the TIGHTER of its own box and the rect it
+      // sits inside, so a geometry override that enlarges the text box past its
+      // card can't mask the overflow (the card rect's height is the real limit).
+      const rects = elements.filter((el) => el.kind === "rect");
+      const enclosingBottom = (e: (typeof elements)[number]): number => {
+        let smallestH = Infinity;
+        let bottom: number | null = null;
+        for (const r of rects) {
+          if (r.key === e.key) continue;
+          const inside =
+            r.x <= e.x + eps && r.y <= e.y + eps &&
+            r.x + r.w >= e.x + e.w - eps && r.y + r.h >= e.y + eps;
+          if (inside && r.h < smallestH) {
+            smallestH = r.h;
+            bottom = r.y + r.h;
+          }
+        }
+        // Fall back to the canvas bottom for freestanding text (no container).
+        return bottom ?? theme.canvas.h;
+      };
       for (const e of elements) {
         const fact: RenderFact = {};
         if (e.x < -eps || e.y < -eps || e.x + e.w > theme.canvas.w + eps || e.y + e.h > theme.canvas.h + eps)
           fact.offCanvas = true;
-        const frame = root.querySelector(`.el-frame[data-key="${e.key}"]`) as HTMLElement | null;
+        // Overflow applies to text only; rects/images are fixed-height containers.
+        const frame = e.kind === "text" ? (root.querySelector(`.el-frame[data-key="${e.key}"]`) as HTMLElement | null) : null;
         if (frame) {
-          const overrunPx = frame.offsetHeight - e.h * PX_PER_IN;
+          const limitBottomPx = Math.min(e.y + e.h, enclosingBottom(e)) * PX_PER_IN;
+          const overrunPx = e.y * PX_PER_IN + frame.offsetHeight - limitBottomPx;
           if (overrunPx > linePx * 0.5) {
             fact.overflowInches = Math.round((overrunPx / PX_PER_IN) * 100) / 100;
             fact.overflowLines = Math.max(1, Math.round(overrunPx / linePx));
