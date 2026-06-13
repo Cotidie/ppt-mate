@@ -5,6 +5,7 @@ import type { Theme } from "../theme/theme";
 import { ptToIn } from "../theme/theme";
 import type { Element, Para, Run, TextEl } from "./element";
 import type { Span, Bullet } from "../model/deck";
+import { FOOTER_SOURCE } from "../model/deck";
 
 export const CANVAS = { w: 13.333, h: 7.5 };
 
@@ -82,7 +83,7 @@ export function footer(t: Theme, text: string): TextEl {
     y: CANVAS.h - t.margin.bottom - t.layout.footerH,
     w: CANVAS.w - t.margin.x * 2,
     h: t.layout.footerH,
-    paragraphs: [{ runs: [{ text }] }],
+    paragraphs: [{ runs: [{ text }], source: FOOTER_SOURCE }],
     font: t.fonts.body,
     size: t.type.caption,
     color: t.colors.kicker,

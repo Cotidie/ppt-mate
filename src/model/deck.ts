@@ -15,6 +15,11 @@ export type Span = {
 
 export type RichText = Span[];
 
+// Sentinel `source` marking the deck-wide footer (deck.meta.footer) as inline-
+// editable. Not a slide field path: the editor commits it via /api/footer, which
+// updates the single meta string shown on every slide.
+export const FOOTER_SOURCE = "meta.footer";
+
 export type Bullet = {
   runs: Span[];
   level?: 0 | 1; // 0 = top-level, 1 = sub-bullet

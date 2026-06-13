@@ -16,6 +16,7 @@ import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
 import type { Span } from "../model/deck";
+import { FOOTER_SOURCE } from "../model/deck";
 import { spansToDoc, docToSpans, type PMDoc } from "./richtext";
 
 const COLOR = "#D64545";
@@ -152,7 +153,10 @@ function EditorInstance({
     finalized.current = true;
     const next = docToSpans(editor.getJSON() as unknown as PMDoc);
     onClose();
-    void commitSpans(slideId, path, next);
+    // The footer is the deck-wide meta string, not a slide field: flatten the
+    // edited runs to plain text and commit it via its own route.
+    if (path === FOOTER_SOURCE) void commitFooter(next);
+    else void commitSpans(slideId, path, next);
   }
 
   function discard() {
@@ -234,4 +238,17 @@ async function commitSpans(id: string, path: string, value: Span[]): Promise<voi
     body: JSON.stringify({ id, path, value }),
   });
   if (!res.ok) alert("Edit failed. Is the dev server running?");
+}
+
+// The deck footer is a single meta string rendered on every slide. Commit it as
+// plain text (footer carries no marks) to its own route, which rewrites
+// deck.meta.footer and reloads all slides.
+async function commitFooter(value: Span[]): Promise<void> {
+  const text = value.map((s) => s.text).join("");
+  const res = await fetch("/api/footer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ value: text }),
+  });
+  if (!res.ok) alert("Footer edit failed. Is the dev server running?");
 }

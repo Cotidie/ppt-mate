@@ -24,6 +24,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/rename", handleRenameSlide);
       server.middlewares.use("/api/slides/edit", handleEditSlide);
       server.middlewares.use("/api/slides/move", handleMoveSlide);
+      server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/chat/reset", handleChatReset);
       server.middlewares.use("/api/chat", handleChat);
       bindShutdown(server.httpServer);
@@ -247,6 +248,26 @@ async function moveSlideElement(id: string, key: string, dx: number, dy: number)
   slide.offsets ??= {};
   const prev = slide.offsets[key] ?? { dx: 0, dy: 0 };
   slide.offsets[key] = { dx: prev.dx + dx, dy: prev.dy + dy };
+  await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
+}
+
+// The footer is deck-wide (deck.meta.footer), shown on every slide. Editing it
+// from any slide updates the single meta string, so all slides reflect it.
+async function handleEditFooter(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { value } = await readJsonBody(req);
+    await editFooter(String(value));
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+async function editFooter(value: string): Promise<void> {
+  const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
+  deck.meta ??= {};
+  deck.meta.footer = value;
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
 }
 
