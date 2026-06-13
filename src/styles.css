@@ -877,6 +877,21 @@ body.gesture-active * {
   line-height: 1.5;
   color: #e7eaf0;
 }
+.ctx-pop-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  border: 1px solid #353b48;
+  border-radius: 6px;
+}
+
+/* Visual Selection tool: the live drag region over the slide. */
+.visual-rect {
+  position: absolute;
+  border: 1.5px dashed #3b6fd4;
+  background: rgba(59, 111, 212, 0.12);
+  pointer-events: none;
+}
 
 .chat-input-row {
   display: flex;

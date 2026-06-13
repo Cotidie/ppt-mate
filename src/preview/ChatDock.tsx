@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 import { AgentContextBar } from "./AgentContextBar";
+import { getPendingVisual, clearPendingVisual } from "./agentContext";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -68,11 +69,14 @@ export function ChatDock() {
   const send = async () => {
     const message = input.trim();
     if (!message || streaming) return;
+    // Attach a pending Visual Selection crop, if any, to this turn (one-shot).
+    const visual = getPendingVisual();
     setInput("");
     setMessages((m) => [...m, { role: "user", text: message }, { role: "assistant", text: "" }]);
     setStreaming(true);
     try {
-      await streamReply(message, applyEvent, new AbortController().signal);
+      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl);
+      if (visual) clearPendingVisual();
     } catch (err) {
       applyEvent({ kind: "error", text: String(err) });
     } finally {
@@ -319,12 +323,13 @@ type ChatEvent =
 async function streamReply(
   message: string,
   onEvent: (ev: ChatEvent) => void,
-  signal: AbortSignal
+  signal: AbortSignal,
+  image?: string
 ): Promise<void> {
   await fetchEventSource("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(image ? { message, image } : { message }),
     signal,
     openWhenHidden: true, // local dev tool: don't drop the turn on a hidden tab
     async onopen(res) {

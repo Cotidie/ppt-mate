@@ -120,9 +120,9 @@ async function handleRenameSlide(req: IncomingMessage, res: ServerResponse, next
 async function handleChat(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
-    const { message } = await readJsonBody(req);
+    const { message, image } = await readJsonBody(req);
     openEventStream(res);
-    await claude.runTurn(await composeTurn(message), res);
+    await claude.runTurn(await composeTurn(message, image), res);
     sendEvent(res, "done", "");
     res.end();
   } catch (err) {
@@ -144,12 +144,24 @@ async function handleContext(req: IncomingMessage, res: ServerResponse, next: Co
   }
 }
 
+// Content of one user turn: plain text, or text + image blocks (Anthropic
+// MessageParam content). Loosely typed; the SDK message is a MessageParam.
+type TurnContent = string | Array<Record<string, unknown>>;
+
 // Prepend a compact context header to the user's turn so the agent always has
 // minimal awareness (active slide, selection, any render issues) without having
-// to call a tool. Full detail still comes from the `deck` MCP tools.
-async function composeTurn(message: string): Promise<string> {
+// to call a tool. Full detail still comes from the `deck` MCP tools. When the
+// Visual Selection tool attached a crop, ride it along as an image block so the
+// agent sees the selected region pixel-by-pixel beside the text.
+async function composeTurn(message: string, image?: string): Promise<TurnContent> {
   const header = await contextHeader();
-  return header ? `${header}\n\n${message}` : message;
+  const text = header ? `${header}\n\n${message}` : message;
+  if (!image) return text;
+  const data = image.replace(/^data:image\/\w+;base64,/, "");
+  return [
+    { type: "text", text: `${text}\n\n(Attached: a visual crop of the slide region the user selected; inspect it.)` },
+    { type: "image", source: { type: "base64", media_type: "image/png", data } },
+  ];
 }
 
 async function contextHeader(): Promise<string> {
@@ -387,8 +399,8 @@ class ClaudeSession {
   private activeRes?: ServerResponse;
   private endTurn?: () => void;
 
-  runTurn(message: string, res: ServerResponse): Promise<void> {
-    const turn = this.queue.then(() => this.execTurn(message, res));
+  runTurn(content: TurnContent, res: ServerResponse): Promise<void> {
+    const turn = this.queue.then(() => this.execTurn(content, res));
     this.queue = turn.catch(() => {}); // a failed turn must not wedge the queue
     return turn;
   }
@@ -404,7 +416,7 @@ class ClaudeSession {
     this.reset();
   }
 
-  private execTurn(message: string, res: ServerResponse): Promise<void> {
+  private execTurn(content: TurnContent, res: ServerResponse): Promise<void> {
     this.ensureStarted();
     return new Promise<void>((resolve) => {
       this.activeRes = res;
@@ -413,7 +425,7 @@ class ClaudeSession {
         this.endTurn = undefined;
         resolve();
       };
-      this.input!.push(message);
+      this.input!.push(content);
     });
   }
 
@@ -504,7 +516,7 @@ const claude = new ClaudeSession();
 // we `push` a user turn into it on demand and `close` it on reset.
 type PushableInput = {
   stream: AsyncGenerator<SDKUserMessage>;
-  push: (text: string) => void;
+  push: (content: TurnContent) => void;
   close: () => void;
 };
 
@@ -528,10 +540,10 @@ function createInputStream(): PushableInput {
 
   return {
     stream,
-    push(text) {
+    push(content) {
       const msg = {
         type: "user",
-        message: { role: "user", content: text },
+        message: { role: "user", content },
         parent_tool_use_id: null,
       } as SDKUserMessage;
       if (waiting) {

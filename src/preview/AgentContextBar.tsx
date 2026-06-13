@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import type { Deck, RichText } from "../model/deck";
-import { useAgentContext, type UiContext } from "./agentContext";
+import { useAgentContext, getPendingVisual, type UiContext } from "./agentContext";
 import deckJson from "../../deck.json";
 
 const deck = deckJson as Deck;
@@ -46,6 +46,8 @@ function formatContextLine(ctx: UiContext): string {
   }
   const issues = issueMessages(ctx.render);
   if (issues.length) parts.push(`issues: ${issues.join(", ")}`);
+  // Client-only (the image rides the chat turn, not the server context header).
+  if (ctx.visual) parts.push(`visual: region ${Math.round(ctx.visual.rect.w)}x${Math.round(ctx.visual.rect.h)}px attached`);
   return `[context] ${parts.join("; ")}`;
 }
 
@@ -62,6 +64,8 @@ export function AgentContextBar() {
   const selection = ctx.selection ?? [];
   const selText = ctx.selectedText?.text ?? "";
   const issues = issueMessages(ctx.render);
+  const visual = ctx.visual ?? null;
+  const visualThumb = visual ? getPendingVisual()?.dataUrl : undefined;
   const line = formatContextLine(ctx);
 
   // Pulse the strip whenever the agent's awareness changes, so the user notices.
@@ -102,6 +106,11 @@ export function AgentContextBar() {
             “{selText.length > 24 ? selText.slice(0, 24) + "…" : selText}”
           </span>
         )}
+        {visual && (
+          <span className="ctx-chip" title={`region ${Math.round(visual.rect.w)}x${Math.round(visual.rect.h)}px attached to your next message`}>
+            📷 region
+          </span>
+        )}
         {issues.length > 0 && (
           <span className="ctx-chip warn" title={issues.join("; ")}>
             ⚠ layout issue{issues.length > 1 ? `s (${issues.length})` : ""}
@@ -113,6 +122,12 @@ export function AgentContextBar() {
         <div className="ctx-pop" role="dialog" aria-label="Agent context detail">
           <div className="ctx-pop-title">Context sent to Claude each turn</div>
           <pre className="ctx-pop-line">{line}</pre>
+          {visualThumb && (
+            <>
+              <div className="ctx-pop-title" style={{ marginTop: 8 }}>Visual region (attached to next message)</div>
+              <img className="ctx-pop-thumb" src={visualThumb} alt="selected region" />
+            </>
+          )}
         </div>
       )}
     </div>

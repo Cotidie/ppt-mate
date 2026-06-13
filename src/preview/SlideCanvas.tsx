@@ -8,7 +8,8 @@ import { theme, PX_PER_IN } from "../theme/theme";
 import { ElementView } from "./Element";
 import { SelectionContext, useSelectionState } from "./selection";
 import { useMode } from "./mode";
-import { reportContext, type RenderFact, type TextSel } from "./agentContext";
+import { reportContext, setPendingVisual, type RenderFact, type TextSel, type Rect } from "./agentContext";
+import * as htmlToImage from "html-to-image";
 
 const STAGE_W = theme.canvas.w * PX_PER_IN; // 1280
 const STAGE_H = theme.canvas.h * PX_PER_IN; // 720
@@ -23,7 +24,10 @@ export function SlideCanvas({
   zoom?: number;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [fitScale, setFitScale] = useState(1);
+  // Visual Selection tool: the live rubber-band region (unscaled stage px).
+  const [visualRect, setVisualRect] = useState<Rect | null>(null);
 
   useEffect(() => {
     const fit = () => {
@@ -128,10 +132,46 @@ export function SlideCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slide, footerText]);
 
-  // A press that reaches the stage (not stopped by an element frame) is on empty
-  // canvas: in move mode it rubber-bands a group selection.
+  // A press that reaches the stage (not stopped by an element frame): move mode
+  // rubber-bands a group selection; visual mode rubber-bands a capture region.
   const onStageDown = (e: ReactPointerEvent) => {
     if (mode === "move") selection.beginMarquee(e, scale);
+    else if (mode === "visual") beginVisual(e);
+  };
+
+  // Visual Selection: drag a rectangle (unscaled stage px), then rasterize the
+  // stage and crop to it, handing the PNG to the chat path via setPendingVisual.
+  const beginVisual = (e: ReactPointerEvent) => {
+    if (e.button !== 0) return;
+    const stageEl = stageRef.current;
+    if (!stageEl) return;
+    e.preventDefault();
+    const box = stageEl.getBoundingClientRect();
+    const toStage = (cx: number, cy: number) => ({
+      x: Math.max(0, Math.min(STAGE_W, (cx - box.left) / scale)),
+      y: Math.max(0, Math.min(STAGE_H, (cy - box.top) / scale)),
+    });
+    const start = toStage(e.clientX, e.clientY);
+    let cur = start;
+    const rectOf = (): Rect => ({
+      x: Math.min(start.x, cur.x),
+      y: Math.min(start.y, cur.y),
+      w: Math.abs(cur.x - start.x),
+      h: Math.abs(cur.y - start.y),
+    });
+    const move = (ev: PointerEvent) => {
+      cur = toStage(ev.clientX, ev.clientY);
+      setVisualRect(rectOf());
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const r = rectOf();
+      setVisualRect(null);
+      if (r.w > 8 && r.h > 8) void captureRegion(stageEl, r);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   };
 
   // The CSS transform is visual-only and does not shrink the layout box, so the
@@ -144,6 +184,7 @@ export function SlideCanvas({
         style={{ width: STAGE_W * scale, height: STAGE_H * scale }}
       >
         <div
+          ref={stageRef}
           className="stage"
           style={{
             width: STAGE_W,
@@ -176,6 +217,12 @@ export function SlideCanvas({
               }}
             />
           )}
+          {visualRect && (
+            <div
+              className="visual-rect"
+              style={{ left: visualRect.x, top: visualRect.y, width: visualRect.w, height: visualRect.h }}
+            />
+          )}
           {/* Alignment guides (inches -> unscaled stage px). An x-guide is a thin
               vertical line at `at` spanning start..end; a y-guide the horizontal
               counterpart. Drawn inside the scaled stage, like the marquee. */}
@@ -201,6 +248,30 @@ export function SlideCanvas({
 }
 
 export const STAGE = { w: STAGE_W, h: STAGE_H };
+
+// Rasterize the stage (at native 1280x720, CSS scale neutralized) and crop to the
+// region (unscaled stage px) into a PNG, then hand it to the chat path. 2x pixel
+// ratio so small regions stay legible for the model.
+async function captureRegion(stageEl: HTMLElement, r: Rect): Promise<void> {
+  const ratio = 2;
+  try {
+    const full = await htmlToImage.toCanvas(stageEl, {
+      pixelRatio: ratio,
+      width: STAGE_W,
+      height: STAGE_H,
+      style: { transform: "none", transformOrigin: "top left" },
+    });
+    const c = document.createElement("canvas");
+    c.width = Math.round(r.w * ratio);
+    c.height = Math.round(r.h * ratio);
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(full, r.x * ratio, r.y * ratio, r.w * ratio, r.h * ratio, 0, 0, c.width, c.height);
+    setPendingVisual({ dataUrl: c.toDataURL("image/png"), rect: r });
+  } catch (err) {
+    console.error("Visual capture failed", err);
+  }
+}
 
 // Read the current native text selection as a TextSel, or null if it is collapsed,
 // empty, or outside the stage. Locates the enclosing element (data-key) + deck

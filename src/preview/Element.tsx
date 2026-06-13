@@ -429,8 +429,8 @@ export function ElementView({
   // move only). Keep them mounted while dragging even if the resizing edge slips
   // out from under the cursor and clears hover.
   const multi = sel.selected.size > 1;
-  // No resize affordance in select mode (it picks context, never edits geometry).
-  const showHandles = (hover || dragging) && !multi && !groupDragging && mode !== "select";
+  // Resize affordance only in move/edit (select & visual pick context, not geometry).
+  const showHandles = (hover || dragging) && !multi && !groupDragging && (mode === "move" || mode === "edit");
   // The solid move-style selection outline: a selected group member, during any
   // drag (so an edit-mode resize gets clear feedback), and in move mode on hover.
   // Edit-mode hover/focus keep their own dashed/solid affordance (styles.css).
@@ -463,12 +463,16 @@ export function ElementView({
     // sit ~5px outside the box. Non-text kinds clip their own content (see
     // ElementBody); text overflows so auto-grow + the floating BubbleMenu show.
     overflow: "visible",
-    cursor: mode === "move" ? (dragging ? "grabbing" : "grab") : mode === "select" ? "text" : "default",
+    cursor:
+      mode === "move" ? (dragging ? "grabbing" : "grab")
+      : mode === "select" ? "text"
+      : mode === "visual" ? "crosshair"
+      : "default",
     touchAction: "none",
-    // Move mode is gesture-only (no text highlight); select mode allows native
-    // text selection so the user can sweep letters/words for Claude context.
-    userSelect: mode === "move" ? "none" : mode === "select" ? "text" : undefined,
-    WebkitUserSelect: mode === "move" ? "none" : mode === "select" ? "text" : undefined,
+    // Select mode allows native text selection (sweep letters/words for context);
+    // move + visual are gesture-only, so block text highlight there.
+    userSelect: mode === "select" ? "text" : mode === "move" || mode === "visual" ? "none" : undefined,
+    WebkitUserSelect: mode === "select" ? "text" : mode === "move" || mode === "visual" ? "none" : undefined,
   };
 
   return (

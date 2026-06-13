@@ -23,11 +23,15 @@ export type TextSel = {
   start?: number;
   end?: number;
 };
+export type Rect = { x: number; y: number; w: number; h: number };
 export type UiContext = {
   activeSlideId?: string;
   selection?: string[];
   selectedText?: TextSel | null;
   render?: Record<string, RenderFact>;
+  // Visual Selection: metadata of a captured region crop pending on the next chat
+  // turn (the PNG itself is held in `pendingVisual`, never POSTed).
+  visual?: { rect: Rect; capturedAt: number } | null;
 };
 export type UiContextPatch = UiContext;
 
@@ -57,6 +61,26 @@ function subscribe(fn: () => void): () => void {
 // Live snapshot of what the agent currently knows.
 export function useAgentContext(): UiContext {
   return useSyncExternalStore(subscribe, () => current);
+}
+
+// The captured region crop awaiting the next chat turn. Held only on the client
+// (the base64 PNG is large and rides the chat POST, NOT /api/context). The chip
+// metadata is mirrored into `current.visual` so the indicator can react.
+let pendingVisual: { dataUrl: string; rect: Rect } | null = null;
+
+export function setPendingVisual(v: { dataUrl: string; rect: Rect }): void {
+  pendingVisual = v;
+  current = { ...current, visual: { rect: v.rect, capturedAt: Date.now() } };
+  listeners.forEach((fn) => fn());
+}
+export function clearPendingVisual(): void {
+  if (!pendingVisual && !current.visual) return;
+  pendingVisual = null;
+  current = { ...current, visual: null };
+  listeners.forEach((fn) => fn());
+}
+export function getPendingVisual(): { dataUrl: string; rect: Rect } | null {
+  return pendingVisual;
 }
 
 function flush(): void {
