@@ -57,6 +57,9 @@ function useElementGesture(slideId: string, key: string, scale: number, baseW: n
   function begin(e: ReactPointerEvent, dir: Dir | null) {
     if (e.button !== 0) return;
     e.stopPropagation();
+    // Stop the press from starting a native text selection that the drag would
+    // then sweep across the slide.
+    e.preventDefault();
     const startX = e.clientX;
     const startY = e.clientY;
     let moved = false;
@@ -337,6 +340,9 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
     overflow: isText ? "visible" : "hidden",
     cursor: mode === "move" ? (pending ? "grabbing" : "grab") : "default",
     touchAction: "none",
+    // Move mode is gesture-only; never let a drag highlight text.
+    userSelect: mode === "move" ? "none" : undefined,
+    WebkitUserSelect: mode === "move" ? "none" : undefined,
   };
 
   return (
