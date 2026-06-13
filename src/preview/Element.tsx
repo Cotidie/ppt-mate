@@ -462,6 +462,7 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
   return (
     <div
       className={"el-frame " + mode + (isText ? " editable" : "") + (selected ? " selected" : "")}
+      data-key={e.key}
       style={frameStyle}
       onPointerDown={onBodyDown}
       onPointerEnter={() => setHover(true)}

@@ -8,6 +8,7 @@ import { theme, PX_PER_IN } from "../theme/theme";
 import { ElementView } from "./Element";
 import { SelectionContext, useSelectionState } from "./selection";
 import { useMode } from "./mode";
+import { reportContext, type RenderFact } from "./agentContext";
 
 const STAGE_W = theme.canvas.w * PX_PER_IN; // 1280
 const STAGE_H = theme.canvas.h * PX_PER_IN; // 720
@@ -44,6 +45,48 @@ export function SlideCanvas({
 
   const mode = useMode();
   const selection = useSelectionState(elements, slide.id, scale);
+
+  // Report the live selection to the agent (slide-scoped; App clears it on switch).
+  useEffect(() => {
+    reportContext({ selection: [...selection.selected] });
+  }, [selection.selected]);
+
+  // Measure rendered layout (text overflow past its box + off-canvas) and report
+  // it, so the agent can see and fix visual problems the model alone can't predict.
+  // Runs once fonts + layout settle; re-runs on slide change and on remount after
+  // a deck edit (HMR). offsetHeight is unaffected by the stage's CSS scale.
+  useEffect(() => {
+    let cancelled = false;
+    const measure = () => {
+      if (cancelled) return;
+      const root = wrapRef.current;
+      if (!root) return;
+      const facts: Record<string, RenderFact> = {};
+      const eps = 0.02;
+      const linePx = theme.layout.lineHeightPt * (96 / 72);
+      for (const e of elements) {
+        const fact: RenderFact = {};
+        if (e.x < -eps || e.y < -eps || e.x + e.w > theme.canvas.w + eps || e.y + e.h > theme.canvas.h + eps)
+          fact.offCanvas = true;
+        const frame = root.querySelector(`.el-frame[data-key="${e.key}"]`) as HTMLElement | null;
+        if (frame) {
+          const overrunPx = frame.offsetHeight - e.h * PX_PER_IN;
+          if (overrunPx > linePx * 0.5) {
+            fact.overflowInches = Math.round((overrunPx / PX_PER_IN) * 100) / 100;
+            fact.overflowLines = Math.max(1, Math.round(overrunPx / linePx));
+          }
+        }
+        if (Object.keys(fact).length) facts[e.key] = fact;
+      }
+      reportContext({ render: facts });
+    };
+    const fontsReady = (document as { fonts?: { ready: Promise<unknown> } }).fonts?.ready ?? Promise.resolve();
+    fontsReady.then(() => requestAnimationFrame(measure));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slide, footerText]);
 
   // A press that reaches the stage (not stopped by an element frame) is on empty
   // canvas: in move mode it rubber-bands a group selection.

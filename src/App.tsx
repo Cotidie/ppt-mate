@@ -6,6 +6,7 @@ import { ChatDock } from "./preview/ChatDock";
 import { Toolbox, type ZoomAction } from "./preview/Toolbox";
 import { Settings } from "./preview/Settings";
 import { ModeContext, type Mode } from "./preview/mode";
+import { reportContext } from "./preview/agentContext";
 import deckJson from "../deck.json";
 
 const deck = deckJson as Deck;
@@ -70,6 +71,12 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [slides.length]);
+
+  // Tell the agent which slide is active (selection + render facts come from
+  // SlideCanvas). Selection is slide-scoped, so reset it as the slide changes.
+  useEffect(() => {
+    reportContext({ activeSlideId: slides[i].id, selection: [] });
+  }, [i, slides]);
 
   return (
     <div className="app" style={{ "--rail-w": `${railWidth.value}px` } as CSSProperties}>
