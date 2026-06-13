@@ -105,6 +105,17 @@ body.gesture-active * {
   -webkit-user-select: none !important;
 }
 
+/* Rubber-band group-selection rectangle, drawn in the stage's own (unscaled) px
+   so it scales with the stage transform. Non-interactive so it never eats the
+   pointer events driving the drag. */
+.marquee {
+  position: absolute;
+  background: rgba(59, 111, 212, 0.12);
+  border: 1px solid rgba(59, 111, 212, 0.8);
+  pointer-events: none;
+  z-index: 6;
+}
+
 .resize-handle {
   position: absolute;
   width: 9px;

@@ -28,6 +28,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/delete", handleDeleteSlide);
       server.middlewares.use("/api/slides/rename", handleRenameSlide);
       server.middlewares.use("/api/slides/edit", handleEditSlide);
+      server.middlewares.use("/api/slides/move-batch", handleMoveBatch);
       server.middlewares.use("/api/slides/move", handleMoveSlide);
       server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
@@ -305,20 +306,49 @@ async function handleMoveSlide(req: IncomingMessage, res: ServerResponse, next: 
 type Delta = { dx: number; dy: number; dw: number; dh: number };
 
 async function transformSlideElement(id: string, key: string, d: Delta): Promise<void> {
-  if (!key || ![d.dx, d.dy, d.dw, d.dh].every(Number.isFinite)) return;
+  await transformSlideElements(id, [{ key, ...d }]);
+}
+
+// Group move: apply many per-element deltas to one slide in a single
+// read-modify-write so the whole group commits atomically (one HMR, no file
+// race between members). Each delta composes onto that element's prior override,
+// exactly like the single-element path.
+async function handleMoveBatch(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { id, moves } = await readJsonBody(req);
+    const list = (Array.isArray(moves) ? moves : []).map((m) => ({
+      key: m.key,
+      dx: Number(m.dx) || 0,
+      dy: Number(m.dy) || 0,
+      dw: Number(m.dw) || 0,
+      dh: Number(m.dh) || 0,
+    }));
+    await transformSlideElements(id, list);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+async function transformSlideElements(id: string, moves: ({ key: string } & Delta)[]): Promise<void> {
+  const valid = moves.filter((m) => m.key && [m.dx, m.dy, m.dw, m.dh].every(Number.isFinite));
+  if (!valid.length) return;
   const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
   const slide = deck.slides.find((s: { id: string }) => s.id === id);
   if (!slide) return;
   slide.overrides ??= {};
-  const prev = slide.overrides[key] ?? {};
-  const next = {
-    dx: (prev.dx ?? 0) + d.dx,
-    dy: (prev.dy ?? 0) + d.dy,
-    dw: (prev.dw ?? 0) + d.dw,
-    dh: (prev.dh ?? 0) + d.dh,
-  };
-  // Keep the stored override sparse: drop axes that net to zero.
-  slide.overrides[key] = Object.fromEntries(Object.entries(next).filter(([, v]) => v !== 0));
+  for (const m of valid) {
+    const prev = slide.overrides[m.key] ?? {};
+    const next = {
+      dx: (prev.dx ?? 0) + m.dx,
+      dy: (prev.dy ?? 0) + m.dy,
+      dw: (prev.dw ?? 0) + m.dw,
+      dh: (prev.dh ?? 0) + m.dh,
+    };
+    // Keep the stored override sparse: drop axes that net to zero.
+    slide.overrides[m.key] = Object.fromEntries(Object.entries(next).filter(([, v]) => v !== 0));
+  }
   await writeFile(DECK_PATH, JSON.stringify(deck, null, 2) + "\n", "utf8");
 }
 
