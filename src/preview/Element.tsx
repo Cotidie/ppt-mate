@@ -377,9 +377,16 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
   const { x, y, w, h } = optimistic ?? e;
 
   const isText = e.kind === "text";
-  // Keep handles + selection outline while dragging, even if the resizing edge
-  // slips out from under the cursor and clears hover.
-  const showHandles = mode === "move" && (hover || dragging);
+  // Resize handles are available in BOTH modes (edit-mode resize lets the user
+  // reflow text by box size). Body-drag still only moves in move mode; in edit
+  // mode the body stays click-to-edit, so only the handles act here.
+  // Keep them mounted while dragging even if the resizing edge slips out from
+  // under the cursor and clears hover.
+  const showHandles = hover || dragging;
+  // The solid move-style selection outline: in move mode on hover, and during any
+  // drag (so an edit-mode resize gets clear feedback). Edit-mode hover/focus keep
+  // their own dashed/solid affordance (see styles.css :not(.selected)).
+  const selected = dragging || (mode === "move" && hover);
 
   const frameStyle: CSSProperties = {
     position: "absolute",
@@ -400,7 +407,7 @@ export function ElementView({ e, slideId, scale }: { e: Element; slideId: string
 
   return (
     <div
-      className={"el-frame " + mode + (isText ? " editable" : "") + (showHandles ? " selected" : "")}
+      className={"el-frame " + mode + (isText ? " editable" : "") + (selected ? " selected" : "")}
       style={frameStyle}
       {...bodyProps}
       onPointerEnter={() => setHover(true)}

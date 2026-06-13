@@ -64,20 +64,25 @@ body {
   outline: 1px solid rgba(59, 111, 212, 0.9);
 }
 
-.el-frame.edit.editable:hover {
+/* :not(.selected) so an active drag's solid outline wins (no double border). */
+.el-frame.edit.editable:hover:not(.selected) {
   outline: 1px dashed rgba(59, 111, 212, 0.6);
   border-radius: 3px;
 }
 
-.el-frame.edit.editable:has(.slide-editable.editing) {
+.el-frame.edit.editable:has(.slide-editable.editing):not(.selected) {
   outline: 2px solid #3b6fd4;
 }
 
 /* During a move/resize drag, force one cursor across the whole document so it
-   never reverts to the arrow over empty space or a slipped-away edge. */
+   never reverts to the arrow over empty space or a slipped-away edge, and block
+   text selection (edit mode leaves text selectable, so the resize drag would
+   otherwise highlight it). */
 body.gesture-active,
 body.gesture-active * {
   cursor: var(--gesture-cursor, default) !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 .resize-handle {
