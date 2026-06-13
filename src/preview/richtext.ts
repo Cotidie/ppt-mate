@@ -1,6 +1,9 @@
-// Serializes between deck Span[] and a single-paragraph ProseMirror document.
-// The TipTap editor edits one field, which is exactly one paragraph of inline
-// runs, no block structure. Marks map 1:1 to Span fields.
+// Serializes between deck Span[] / paragraph lists and a ProseMirror document.
+// One TipTap editor backs one whole text element. A single-field element (title,
+// note, a table cell) is one paragraph of inline runs; a list element (bullets,
+// cover authors) is many paragraphs in ONE editor, so a selection - and any
+// formatting - can span them. Marks map 1:1 to Span fields; each paragraph node
+// carries the bullet flag + indent level as attributes.
 
 import type { Span } from "../model/deck";
 
@@ -17,13 +20,28 @@ type Mark =
 
 type TextNode = { type: "text"; text: string; marks?: Mark[] };
 
-export type PMDoc = {
-  type: "doc";
-  content: [{ type: "paragraph"; content?: TextNode[] }];
+type ParaNode = {
+  type: "paragraph";
+  attrs?: { bullet?: boolean; indentLevel?: number };
+  content?: TextNode[];
 };
 
-export function spansToDoc(spans: Span[]): PMDoc {
-  const content: TextNode[] = spans
+export type PMDoc = {
+  type: "doc";
+  content: ParaNode[];
+};
+
+// One editable paragraph: its inline runs plus the bullet/indent it renders with.
+export type EditorPara = {
+  runs: Span[];
+  bullet?: boolean;
+  indentLevel?: number;
+};
+
+// --- run <-> inline-node bridges (mark mapping lives here, used by both dirs) ---
+
+function runsToNodes(spans: Span[]): TextNode[] {
+  return spans
     .filter((s) => s.text.length > 0)
     .map((s) => {
       const marks: Mark[] = [];
@@ -40,14 +58,9 @@ export function spansToDoc(spans: Span[]): PMDoc {
       if (s.highlight) marks.push({ type: "highlight", attrs: { color: s.highlight } });
       return marks.length ? { type: "text", text: s.text, marks } : { type: "text", text: s.text };
     });
-  return {
-    type: "doc",
-    content: [{ type: "paragraph", content: content.length ? content : undefined }],
-  };
 }
 
-export function docToSpans(doc: PMDoc): Span[] {
-  const nodes = doc.content[0]?.content ?? [];
+function nodesToRuns(nodes: TextNode[]): Span[] {
   const spans: Span[] = nodes
     .filter((n) => n.text.length > 0)
     .map((n) => {
@@ -64,6 +77,41 @@ export function docToSpans(doc: PMDoc): Span[] {
       return span;
     });
   return mergeAdjacent(spans);
+}
+
+// --- paragraph-list (the general case) <-> doc -------------------------------
+
+export function parasToDoc(paras: EditorPara[]): PMDoc {
+  const content: ParaNode[] = (paras.length ? paras : [{ runs: [] }]).map((p) => {
+    const nodes = runsToNodes(p.runs);
+    const attrs: { bullet?: boolean; indentLevel?: number } = {};
+    if (p.bullet) attrs.bullet = true;
+    if (p.indentLevel) attrs.indentLevel = p.indentLevel;
+    return {
+      type: "paragraph",
+      ...(Object.keys(attrs).length ? { attrs } : null),
+      ...(nodes.length ? { content: nodes } : null),
+    };
+  });
+  return { type: "doc", content };
+}
+
+export function docToParas(doc: PMDoc): EditorPara[] {
+  return doc.content.map((p) => ({
+    runs: nodesToRuns(p.content ?? []),
+    bullet: p.attrs?.bullet,
+    indentLevel: p.attrs?.indentLevel,
+  }));
+}
+
+// --- single-field convenience wrappers (one paragraph, no bullet) ------------
+
+export function spansToDoc(spans: Span[]): PMDoc {
+  return parasToDoc([{ runs: spans }]);
+}
+
+export function docToSpans(doc: PMDoc): Span[] {
+  return docToParas(doc)[0]?.runs ?? [];
 }
 
 function mergeAdjacent(spans: Span[]): Span[] {

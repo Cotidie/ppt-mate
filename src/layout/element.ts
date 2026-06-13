@@ -44,6 +44,11 @@ export type TextEl = {
   align?: Align;
   valign?: VAlign;
   lineHeightPt?: number;
+  // When set, the element's paragraphs are one editable LIST committed as a whole
+  // array at `path` (so a selection can span them): "bullets" items are
+  // {runs, level}, "lines" items are Span[]. Absent => single-field paragraphs
+  // (each carries its own Para.source).
+  list?: { path: string; item: "bullets" | "lines" };
 };
 
 export type RectEl = {

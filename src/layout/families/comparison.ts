@@ -41,13 +41,12 @@ export function resolveComparison(s: Comparison, t: Theme, footerText: string): 
       valign: "middle",
     });
 
-    const paragraphs: Para[] = card.bullets.map((b, j) => ({
+    const paragraphs: Para[] = card.bullets.map((b) => ({
       runs: spansToRuns(b.runs),
       bullet: true,
       indentLevel: b.level ?? 0,
       spaceAfterPt: 6,
       align: "left",
-      source: `cards.${i}.bullets.${j}.runs`,
     }));
     els.push({
       kind: "text",
@@ -63,6 +62,8 @@ export function resolveComparison(s: Comparison, t: Theme, footerText: string): 
       align: "left",
       valign: "top",
       lineHeightPt: t.type.body * 1.35,
+      // The card's bullets are one editable list (path = its parent array).
+      list: { path: `cards.${i}.bullets`, item: "bullets" },
     });
   });
 

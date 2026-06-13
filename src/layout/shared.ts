@@ -102,13 +102,12 @@ export function bulletsElement(
 ): TextEl {
   const size = opts?.size ?? t.type.body;
   const prefix = opts?.sourcePrefix ?? "bullets";
-  const paragraphs: Para[] = bullets.map((b, i) => ({
+  const paragraphs: Para[] = bullets.map((b) => ({
     runs: spansToRuns(b.runs),
     bullet: true,
     indentLevel: b.level ?? 0,
     spaceAfterPt: 6,
     align: "left",
-    source: `${prefix}.${i}.runs`,
   }));
   return {
     kind: "text",
@@ -121,6 +120,8 @@ export function bulletsElement(
     align: "left",
     valign: "top",
     lineHeightPt: size * 1.35,
+    // The whole bullet array is one editable list (path = its parent array).
+    list: { path: prefix, item: "bullets" },
   };
 }
 

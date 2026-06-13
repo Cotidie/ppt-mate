@@ -75,10 +75,9 @@ export function resolveCover(s: Cover, t: Theme, footerText: string): Element[] 
       y,
       w: w * 0.62,
       h: 1.6,
-      paragraphs: s.authors.map((a, i) => ({
+      paragraphs: s.authors.map((a) => ({
         runs: spansToRuns(a),
         spaceAfterPt: 4,
-        source: `authors.${i}`,
       })),
       font: t.fonts.body,
       size: t.type.body,
@@ -86,6 +85,8 @@ export function resolveCover(s: Cover, t: Theme, footerText: string): Element[] 
       align: "left",
       valign: "top",
       lineHeightPt: t.type.body * 1.5,
+      // Each author is a line in one editable list (path = the authors array).
+      list: { path: "authors", item: "lines" },
     });
   }
 
