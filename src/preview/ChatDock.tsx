@@ -5,6 +5,23 @@ import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
 
+// Claude account info (from /api/account) + live session stats (from chat `meta`
+// SSE frames). Shown in the dock's left panel.
+type Account = {
+  loggedIn?: boolean;
+  email?: string;
+  authMethod?: string;
+  subscriptionType?: string;
+  orgName?: string;
+  model?: string;
+};
+// One `meta` SSE frame: model (once, on init) or cost+usage (per result).
+type Usage = { input_tokens?: number; output_tokens?: number };
+type MetaFrame = { model?: string; cost?: number; usage?: Usage };
+// Accumulated session stats shown in the panel: cost is cumulative from the
+// server, tokens summed across this session's turns.
+type Stats = { model?: string; cost?: number; tokens?: number };
+
 const HEIGHT_MIN = 140;
 const HEIGHT_HIDE_AT = 60; // drag shorter than this and the dock snaps shut
 const HEIGHT_KEY = "ppt.chatHeight";
@@ -18,12 +35,22 @@ export function ChatDock() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [stats, setStats] = useState<Stats>({});
   const height = useChatHeight();
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [messages]);
+
+  // Who's signed in + plan; one-shot on mount (server caches it).
+  useEffect(() => {
+    fetch("/api/account")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((a) => a && setAccount(a))
+      .catch(() => {});
+  }, []);
 
   const send = async () => {
     const message = input.trim();
@@ -47,6 +74,7 @@ export function ChatDock() {
     if (streaming) return;
     await fetch("/api/chat/reset", { method: "POST" }).catch(() => {});
     setMessages([]);
+    setStats((s) => ({ model: s.model })); // fresh process: cost/tokens restart
   };
 
   // Folds a parsed SSE event into the message list. Assistant text deltas append
@@ -54,6 +82,17 @@ export function ChatDock() {
   const applyEvent = (ev: ChatEvent) => {
     if (ev.kind === "delta") appendToLast(setMessages, ev.text);
     else if (ev.kind === "error") setMessages((m) => [...m, { role: "error", text: ev.text }]);
+    else if (ev.kind === "meta")
+      setStats((prev) => {
+        const f = ev.meta;
+        return {
+          model: f.model ?? prev.model,
+          cost: f.cost ?? prev.cost, // server-cumulative
+          tokens: f.usage
+            ? (prev.tokens ?? 0) + (f.usage.input_tokens ?? 0) + (f.usage.output_tokens ?? 0)
+            : prev.tokens,
+        };
+      });
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -81,7 +120,9 @@ export function ChatDock() {
         <span className="resizer-grip resizer-grip-h" aria-hidden="true" />
       </div>
       {hidden ? null : (
-        <>
+        <div className="chat-body">
+      <AccountPanel account={account} stats={stats} />
+      <div className="chat-col">
       <div className="chat-log" ref={logRef}>
         {messages.map((m, i) => (
           <div key={i} className={"chat-msg chat-" + m.role}>
@@ -123,9 +164,44 @@ export function ChatDock() {
           )}
         </div>
       </div>
-        </>
+      </div>
+        </div>
       )}
     </div>
+  );
+}
+
+// Left-rail panel inside the dock: Claude account, active model, and live session
+// cost/usage. Static account fields come from /api/account; model and cost/tokens
+// stream in from the chat turns (`meta` frames). Falls back gracefully before any
+// turn has run (cost/tokens show "—").
+function AccountPanel({ account, stats }: { account: Account | null; stats: Stats }) {
+  const model = stats.model ?? account?.model;
+  return (
+    <aside className="chat-panel">
+      <div className="cp-section">
+        <div className="cp-label">Account</div>
+        <div className="cp-value" title={account?.email}>{account?.email ?? "…"}</div>
+        {account?.subscriptionType && (
+          <span className="cp-badge">{account.subscriptionType}</span>
+        )}
+      </div>
+      <div className="cp-section">
+        <div className="cp-label">Model</div>
+        <div className="cp-value" title={model}>{model ?? "…"}</div>
+      </div>
+      <div className="cp-section">
+        <div className="cp-label">Session</div>
+        <div className="cp-stat">
+          <span>Cost</span>
+          <span>{stats.cost != null ? `$${stats.cost.toFixed(4)}` : "—"}</span>
+        </div>
+        <div className="cp-stat">
+          <span>Tokens</span>
+          <span>{stats.tokens != null ? stats.tokens.toLocaleString() : "—"}</span>
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -168,7 +244,8 @@ function snapHeight(px: number): number {
 
 type ChatEvent =
   | { kind: "delta"; text: string }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  | { kind: "meta"; meta: MetaFrame };
 
 // POSTs the message and reads the SSE response via fetch-event-source, handing
 // the caller a normalized ChatEvent per frame. Resolves when the server ends the
@@ -220,6 +297,13 @@ function toEvent(event: string, data: string): ChatEvent | null {
       /* fall back to raw */
     }
     return { kind: "error", text: text || "Claude Code failed to start." };
+  }
+  if (event === "meta") {
+    try {
+      return { kind: "meta", meta: JSON.parse(data) as MetaFrame };
+    } catch {
+      return null;
+    }
   }
   return null;
 }

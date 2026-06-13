@@ -14,6 +14,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
 const OUT_DIR = resolve(HERE, "out");
+const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
 
 // Captured so the export route can load the TypeScript exporter through Vite's
@@ -33,6 +34,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/export", handleExport);
+      server.middlewares.use("/api/account", handleAccount);
       server.middlewares.use("/api/chat/reset", handleChatReset);
       server.middlewares.use("/api/chat", handleChat);
       bindShutdown(server.httpServer);
@@ -99,6 +101,49 @@ function handleChatReset(req: IncomingMessage, res: ServerResponse, next: Connec
   if (req.method !== "POST") return next();
   claude.reset();
   sendJson(res, 200, { ok: true });
+}
+
+// Claude account info for the ChatDock panel: who's signed in and on what plan.
+// Pulled from `claude auth status --json` (the only programmatic source). Cached
+// for the dev-server lifetime since auth rarely changes mid-session; a failed
+// read drops the cache so the next request retries.
+let accountCache: Promise<unknown> | null = null;
+
+function handleAccount(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "GET") return next();
+  (accountCache ??= readAccount()).then(
+    (info) => sendJson(res, 200, info),
+    (err) => {
+      accountCache = null;
+      sendJson(res, 500, { error: String(err) });
+    },
+  );
+}
+
+function readAccount(): Promise<unknown> {
+  return new Promise((resolveAcct, reject) => {
+    const child = spawn(CLAUDE_BIN, ["auth", "status", "--json"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.on("error", reject);
+    child.on("exit", () => {
+      try {
+        const j = JSON.parse(out);
+        resolveAcct({
+          loggedIn: j.loggedIn,
+          email: j.email,
+          authMethod: j.authMethod,
+          subscriptionType: j.subscriptionType,
+          orgName: j.orgName,
+          model: CLAUDE_MODEL, // alias; the live model id arrives via the chat stream's `meta`
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
 }
 
 // A single persistent Claude Agent SDK session per dev server, driven in
@@ -171,7 +216,14 @@ class ClaudeSession {
         if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
           this.send("delta", JSON.stringify(ev.delta.text));
         }
+      } else if (msg.type === "system" && (msg as { subtype?: string }).subtype === "init") {
+        // Init carries the resolved model id (e.g. "claude-opus-4-8"), once per session.
+        const model = (msg as { model?: string }).model;
+        if (model) this.send("meta", JSON.stringify({ model }));
       } else if (msg.type === "result") {
+        // Cumulative session cost + this turn's token usage, for the dock panel.
+        const r = msg as { total_cost_usd?: number; usage?: unknown };
+        this.send("meta", JSON.stringify({ cost: r.total_cost_usd, usage: r.usage }));
         this.endTurn?.();
       }
     }
