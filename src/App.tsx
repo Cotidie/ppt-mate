@@ -91,6 +91,9 @@ export default function App() {
       <aside className="rail">
         {railWidth.value > 0 && (
           <>
+            <div className="rail-head">
+              <span className="files-title">Slide deck</span>
+            </div>
             <div className="rail-slides">
               {slides.map((s, idx) => (
                 <div className="thumb-row" key={s.id}>

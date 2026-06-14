@@ -222,6 +222,14 @@ body.gesture-active * {
   min-height: 0;
 }
 
+/* Fixed header above the slide thumbnails; mirrors the WORKSPACE header. */
+.rail-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px 6px;
+}
+
 /* Upper rail: slide thumbnails, fills the space above the splitter. */
 .rail-slides {
   flex: 1 1 auto;
