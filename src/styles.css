@@ -392,10 +392,13 @@ body.gesture-active * {
 .files-row:focus {
   outline: none;
 }
-/* Selected/focused row (getNodeProps puts role=treeitem + aria-selected on the
-   .files-row div itself, so target it directly - not a wrapping li). */
+/* Selected/focused row. For leaf nodes getNodeProps puts role=treeitem +
+   aria-selected on the .files-row div; for folders the library puts them on the
+   wrapping li.tree-branch-wrapper, so highlight that case too. */
 .files-row[aria-selected="true"],
-.files-row:focus {
+.files-row:focus,
+.tree-branch-wrapper[aria-selected="true"] > .files-row,
+.tree-branch-wrapper:focus > .files-row {
   background: #2d3950;
 }
 
@@ -419,7 +422,8 @@ body.gesture-active * {
   transition: opacity 0.1s ease;
 }
 .files-row:hover .files-rename,
-.files-row:focus .files-rename {
+.files-row:focus .files-rename,
+.tree-branch-wrapper:focus > .files-row .files-rename {
   opacity: 1;
 }
 .files-rename:hover {
