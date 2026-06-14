@@ -306,6 +306,18 @@ body.gesture-active * {
   background: #2a3550;
   color: #e7eaf0;
 }
+.files-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.files-action:disabled:hover {
+  background: transparent;
+  color: #8b93a3;
+}
+.files-action.danger:hover:not(:disabled) {
+  background: #3a2326;
+  color: #e8a3a3;
+}
 
 .files-body {
   flex: 1 1 auto;

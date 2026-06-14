@@ -7,7 +7,7 @@ import type { Plugin, Connect } from "vite";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
-import { readFile, writeFile, readdir, stat, mkdir, rename as renameFs } from "node:fs/promises";
+import { readFile, writeFile, readdir, stat, mkdir, rename as renameFs, rm } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { query, createSdkMcpServer, tool, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -81,6 +81,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/workspace/open", handleWorkspaceOpen);
       server.middlewares.use("/api/workspace/mkdir", handleWorkspaceMkdir);
       server.middlewares.use("/api/workspace/rename", handleWorkspaceRename);
+      server.middlewares.use("/api/workspace/remove", handleWorkspaceRemove);
       server.middlewares.use("/api/workspace", handleWorkspace);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
@@ -395,6 +396,28 @@ async function handleWorkspaceRename(req: IncomingMessage, res: ServerResponse, 
     }
     await renameFs(abs, target);
     sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// POST /api/workspace/remove { paths: string[] } -> delete files/folders inside
+// files/ (folders recursively). Sandboxed: if any path escapes files/ or is the
+// root, the whole batch is rejected. A missing path is ignored (force).
+async function handleWorkspaceRemove(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { paths } = await readJsonBody(req);
+    const list = Array.isArray(paths) ? paths.map((p) => String(p)) : [];
+    if (!list.length) return sendJson(res, 400, { error: "Nothing to remove." });
+    const targets: string[] = [];
+    for (const p of list) {
+      const abs = resolveWorkspacePath(p);
+      if (!abs || abs === WORKSPACE_DIR) return sendJson(res, 400, { error: `Cannot remove: ${p}` });
+      targets.push(abs);
+    }
+    for (const abs of targets) await rm(abs, { recursive: true, force: true });
+    sendJson(res, 200, { ok: true, removed: targets.length });
   } catch (err) {
     sendJson(res, 500, { error: String(err) });
   }
