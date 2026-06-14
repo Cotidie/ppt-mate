@@ -257,12 +257,12 @@ function AccountPanel({
   canClear: boolean;
 }) {
   const model = stats.model ?? account?.model;
-  const ctxPct = stats.contextUsed != null && stats.contextWindow
-    ? stats.contextUsed / stats.contextWindow * 100
-    : null;
-  const ctxDetail = stats.contextUsed != null && stats.contextWindow
-    ? `${fmtTok(stats.contextUsed)}/${fmtTok(stats.contextWindow)}`
-    : "—";
+  // Before the first turn there is genuinely no context used, so show a real 0%
+  // gauge (a "—" reads as an error). Default the window to the server's 1.0M.
+  const ctxUsed = stats.contextUsed ?? 0;
+  const ctxWindow = stats.contextWindow ?? 1_000_000;
+  const ctxPct = ctxUsed / ctxWindow * 100;
+  const ctxDetail = `${fmtTok(ctxUsed)}/${fmtTok(ctxWindow)}`;
   const fh = usage?.fiveHour;
   const sd = usage?.sevenDay;
   return (
