@@ -24,6 +24,17 @@ export type TextSel = {
   end?: number;
 };
 export type Rect = { x: number; y: number; w: number; h: number };
+// Where a visual selection sits on the slide, in the units the layout engine and
+// deck.json already use (inches, top-left origin, fixed 13.333x7.5in canvas), so
+// the agent can act on the position directly - even when the cropped pixels are
+// blank. Rides the chat turn alongside the crop; not part of /api/context.
+export type VisualRegion = {
+  unit: "in";
+  canvas: { w: number; h: number };
+  rect: { x: number; y: number; w: number; h: number };
+  center: { x: number; y: number };
+  zone: string; // 3x3 grid label from the center, e.g. "top-left", "center"
+};
 export type UiContext = {
   activeSlideId?: string;
   selection?: string[];
@@ -66,9 +77,9 @@ export function useAgentContext(): UiContext {
 // The captured region crop awaiting the next chat turn. Held only on the client
 // (the base64 PNG is large and rides the chat POST, NOT /api/context). The chip
 // metadata is mirrored into `current.visual` so the indicator can react.
-let pendingVisual: { dataUrl: string; rect: Rect } | null = null;
+let pendingVisual: { dataUrl: string; rect: Rect; region: VisualRegion } | null = null;
 
-export function setPendingVisual(v: { dataUrl: string; rect: Rect }): void {
+export function setPendingVisual(v: { dataUrl: string; rect: Rect; region: VisualRegion }): void {
   pendingVisual = v;
   current = { ...current, visual: { rect: v.rect, capturedAt: Date.now() } };
   listeners.forEach((fn) => fn());
@@ -79,7 +90,7 @@ export function clearPendingVisual(): void {
   current = { ...current, visual: null };
   listeners.forEach((fn) => fn());
 }
-export function getPendingVisual(): { dataUrl: string; rect: Rect } | null {
+export function getPendingVisual(): { dataUrl: string; rect: Rect; region: VisualRegion } | null {
   return pendingVisual;
 }
 

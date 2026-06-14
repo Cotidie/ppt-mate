@@ -8,7 +8,7 @@ import { theme, PX_PER_IN } from "../theme/theme";
 import { ElementView } from "./Element";
 import { SelectionContext, useSelectionState } from "./selection";
 import { useMode } from "./mode";
-import { reportContext, setPendingVisual, clearPendingVisual, setSlideCapturer, useAgentContext, type RenderFact, type TextSel, type Rect } from "./agentContext";
+import { reportContext, setPendingVisual, clearPendingVisual, setSlideCapturer, useAgentContext, type RenderFact, type TextSel, type Rect, type VisualRegion } from "./agentContext";
 import * as htmlToImage from "html-to-image";
 
 const STAGE_W = theme.canvas.w * PX_PER_IN; // 1280
@@ -355,6 +355,26 @@ async function captureStage(stageEl: HTMLElement | null): Promise<string | null>
   }
 }
 
+// Convert a stage-px selection rect into a VisualRegion: inches on the fixed
+// canvas (top-left origin), the center point, and a coarse 3x3 zone label - the
+// position info the agent needs when the cropped pixels alone aren't enough.
+function regionOf(r: Rect): VisualRegion {
+  const round = (n: number) => Math.round((n / PX_PER_IN) * 100) / 100;
+  const x = round(r.x);
+  const y = round(r.y);
+  const w = round(r.w);
+  const h = round(r.h);
+  const cx = Math.round((x + w / 2) * 100) / 100;
+  const cy = Math.round((y + h / 2) * 100) / 100;
+  const third = (v: number, span: number) => (v < span / 3 ? 0 : v < (2 * span) / 3 ? 1 : 2);
+  const cols = ["left", "center", "right"];
+  const rows = ["top", "middle", "bottom"];
+  const col = cols[third(cx, theme.canvas.w)];
+  const row = rows[third(cy, theme.canvas.h)];
+  const zone = row === "middle" && col === "center" ? "center" : `${row}-${col}`;
+  return { unit: "in", canvas: { w: theme.canvas.w, h: theme.canvas.h }, rect: { x, y, w, h }, center: { x: cx, y: cy }, zone };
+}
+
 // Rasterize the stage and crop to the region (unscaled stage px) into a PNG, then
 // hand it to the chat path.
 async function captureRegion(stageEl: HTMLElement, r: Rect): Promise<void> {
@@ -367,7 +387,7 @@ async function captureRegion(stageEl: HTMLElement, r: Rect): Promise<void> {
     const ctx = c.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(full, r.x * ratio, r.y * ratio, r.w * ratio, r.h * ratio, 0, 0, c.width, c.height);
-    setPendingVisual({ dataUrl: c.toDataURL("image/png"), rect: r });
+    setPendingVisual({ dataUrl: c.toDataURL("image/png"), rect: r, region: regionOf(r) });
   } catch (err) {
     console.error("Visual capture failed", err);
   }

@@ -5,6 +5,7 @@ import { SlideCanvas } from "./preview/SlideCanvas";
 import { ChatDock } from "./preview/ChatDock";
 import { Toolbox, type ZoomAction } from "./preview/Toolbox";
 import { Settings } from "./preview/Settings";
+import { FileExplorer } from "./preview/FileExplorer";
 import { ModeContext, type Mode } from "./preview/mode";
 import { reportContext } from "./preview/agentContext";
 import deckJson from "../deck.json";
@@ -16,6 +17,12 @@ const RAIL_MAX = 480;
 const RAIL_HIDE_AT = 60; // drag narrower than this and the rail snaps shut
 const RAIL_KEY = "ppt.railWidth";
 
+// Vertical split inside the rail: the file explorer's height (px) at the bottom,
+// the slide thumbnails take the rest.
+const SPLIT_MIN = 80;
+const SPLIT_MAX = 600;
+const SPLIT_KEY = "ppt.railSplit";
+
 const ZOOM_STEP = 0.1;
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 3;
@@ -26,6 +33,7 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const cancelEdit = useRef(false);
   const railWidth = useRailWidth();
+  const railSplit = useRailSplit();
   const [mode, setMode] = useState<Mode>("edit");
   const [zoom, setZoom] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -81,48 +89,67 @@ export default function App() {
   return (
     <div className="app" style={{ "--rail-w": `${railWidth.value}px` } as CSSProperties}>
       <aside className="rail">
-        {railWidth.value > 0 && slides.map((s, idx) => (
-          <div className="thumb-row" key={s.id}>
-            {editingId === s.id ? (
-              <div className="thumb thumb-editing">
-                <span className="thumb-n">{idx + 1}</span>
-                <input
-                  className="thumb-input"
-                  autoFocus
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onFocus={(e) => e.target.select()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                    if (e.key === "Escape") {
-                      cancelEdit.current = true;
-                      e.currentTarget.blur();
-                    }
-                  }}
-                  onBlur={() => commitRename(s)}
-                />
-              </div>
-            ) : (
-              <>
-                <button
-                  className={"thumb" + (idx === i ? " active" : "")}
-                  onClick={() => setI(idx)}
-                  onDoubleClick={() => startRename(s)}
-                  title="Double-click to rename"
-                >
-                  <span className="thumb-n">{idx + 1}</span>
-                  <span className="thumb-label">{labelOf(s)}</span>
-                </button>
-                <button
-                  className="thumb-del"
-                  title="Delete slide"
-                  aria-label={`Delete slide ${idx + 1}`}
-                  onClick={() => deleteSlide(s, slides.length)}
-                />
-              </>
-            )}
-          </div>
-        ))}
+        {railWidth.value > 0 && (
+          <>
+            <div className="rail-head">
+              <span className="files-title">Slide deck</span>
+            </div>
+            <div className="rail-slides">
+              {slides.map((s, idx) => (
+                <div className="thumb-row" key={s.id}>
+                  {editingId === s.id ? (
+                    <div className="thumb thumb-editing">
+                      <span className="thumb-n">{idx + 1}</span>
+                      <input
+                        className="thumb-input"
+                        autoFocus
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") e.currentTarget.blur();
+                          if (e.key === "Escape") {
+                            cancelEdit.current = true;
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        onBlur={() => commitRename(s)}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className={"thumb" + (idx === i ? " active" : "")}
+                        onClick={() => setI(idx)}
+                        onDoubleClick={() => startRename(s)}
+                        title="Double-click to rename"
+                      >
+                        <span className="thumb-n">{idx + 1}</span>
+                        <span className="thumb-label">{labelOf(s)}</span>
+                      </button>
+                      <button
+                        className="thumb-del"
+                        title="Delete slide"
+                        aria-label={`Delete slide ${idx + 1}`}
+                        onClick={() => deleteSlide(s, slides.length)}
+                      />
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div
+              className={"rail-split" + (railSplit.dragging ? " dragging" : "")}
+              role="separator"
+              aria-orientation="horizontal"
+              title="Drag to resize the file explorer"
+              onPointerDown={railSplit.onDragStart}
+            />
+            <div className="rail-files" style={{ height: railSplit.value }}>
+              <FileExplorer />
+            </div>
+          </>
+        )}
       </aside>
 
       <div
@@ -206,6 +233,42 @@ function readStoredWidth(): number {
 function snapWidth(px: number): number {
   if (px < RAIL_HIDE_AT) return 0;
   return Math.max(RAIL_MIN, Math.min(RAIL_MAX, px));
+}
+
+// Drag-resizable file-explorer height inside the rail. The explorer is at the
+// bottom, so dragging the splitter sets height = viewport bottom minus pointer Y.
+// Clamped to [SPLIT_MIN, SPLIT_MAX]; persisted across reloads.
+function useRailSplit() {
+  const [value, setValue] = useState(readStoredSplit);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(SPLIT_KEY, String(value));
+  }, [value]);
+
+  const onDragStart = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    const move = (ev: PointerEvent) => setValue(snapSplit(window.innerHeight - ev.clientY));
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  return { value, dragging, onDragStart };
+}
+
+function readStoredSplit(): number {
+  const raw = localStorage.getItem(SPLIT_KEY);
+  return raw === null ? 220 : snapSplit(Number(raw));
+}
+
+function snapSplit(px: number): number {
+  return Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, px));
 }
 
 function richTextToPlain(rt: import("./model/deck").RichText): string {

@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
+import { Mention, MentionsInput } from "react-mentions";
 import { AgentContextBar } from "./AgentContextBar";
-import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
+import { getPendingVisual, clearPendingVisual, getSlideCapturer, type VisualRegion } from "./agentContext";
 import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
 import { ModeSelect } from "./ModeSelect";
+import { fetchTree } from "./workspaceApi";
+import { collectEntries } from "./workspaceTree";
+
+type Suggestion = { id: string; display: string };
+const MENTION_CACHE_TTL = 1500; // ms; refetch the tree at most this often while typing
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -39,7 +45,8 @@ const HEIGHT_KEY = "ppt.chatHeight";
 // that process.
 export function ChatDock() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+  const [value, setValue] = useState(""); // react-mentions markup value
+  const [plain, setPlain] = useState(""); // plain text actually sent
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState<string>(DEFAULT_MODE);
   const [account, setAccount] = useState<Account | null>(null);
@@ -47,6 +54,36 @@ export function ChatDock() {
   const [usage, setUsage] = useState<ApiUsage | null>(null);
   const height = useChatHeight();
   const logRef = useRef<HTMLDivElement>(null);
+  // "@" mention picker source, kept in sync with the live workspace. The tree is
+  // refetched whenever the cache is older than the TTL (and invalidated on focus),
+  // so uploads and files/folders the agent created always appear. Folders are
+  // listed too (shown with a trailing "/").
+  const entriesRef = useRef<{ at: number; items: Suggestion[] }>({ at: 0, items: [] });
+  const getEntries = async (): Promise<Suggestion[]> => {
+    if (Date.now() - entriesRef.current.at < MENTION_CACHE_TTL) return entriesRef.current.items;
+    try {
+      const items = collectEntries(await fetchTree()).map((e) => ({
+        id: e.path,
+        display: e.type === "dir" ? `${e.path}/` : e.path,
+      }));
+      entriesRef.current = { at: Date.now(), items };
+    } catch {
+      /* keep the last good list */
+    }
+    return entriesRef.current.items;
+  };
+
+  // Invalidate so opening the picker always starts from a fresh fetch.
+  const invalidateEntries = () => {
+    entriesRef.current = { at: 0, items: entriesRef.current.items };
+    void getEntries();
+  };
+
+  const fileSuggestions = async (query: string, cb: (data: Suggestion[]) => void) => {
+    const q = query.toLowerCase();
+    const items = await getEntries();
+    cb(items.filter((e) => e.display.toLowerCase().includes(q)).slice(0, 50));
+  };
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -71,21 +108,22 @@ export function ChatDock() {
   // A non-default execution mode is itself the instruction (it prepends a hint and
   // the agent already has the slide context), so an empty message is allowed then.
   // Default mode still needs typed content.
-  const canSend = !streaming && (input.trim().length > 0 || mode !== DEFAULT_MODE);
+  const canSend = !streaming && (plain.trim().length > 0 || mode !== DEFAULT_MODE);
 
   const send = async () => {
     if (!canSend) return;
-    const message = input.trim();
+    const message = plain.trim();
     // Attach a pending Visual Selection crop, if any, to this turn (one-shot).
     const visual = getPendingVisual();
-    setInput("");
+    setValue("");
+    setPlain("");
     // When the user sent no prose, show the chosen mode as the user's request.
     const modeLabel = EXEC_MODES.find((m) => m.id === mode)?.label ?? mode;
     const shown = message || `▷ ${modeLabel}`;
     setMessages((m) => [...m, { role: "user", text: shown }, { role: "assistant", text: "" }]);
     setStreaming(true);
     try {
-      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl, mode);
+      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl, mode, visual?.region);
       if (visual) clearPendingVisual();
     } catch (err) {
       applyEvent({ kind: "error", text: String(err) });
@@ -118,7 +156,7 @@ export function ChatDock() {
       }));
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (e: KeyboardEvent) => {
     e.stopPropagation(); // keep arrows from flipping slides while typing
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -174,15 +212,28 @@ export function ChatDock() {
       <AgentContextBar />
       <div className="chat-input-row">
         <ModeSelect mode={mode} onChange={setMode} disabled={streaming} />
-        <textarea
-          className="chat-input"
-          placeholder="Ask Claude Code to edit slides, or anything…"
-          value={input}
+        <MentionsInput
+          className="chat-mentions"
+          placeholder="Ask Claude Code to edit slides, or anything… (@ to reference a file)"
+          value={value}
           disabled={streaming}
-          rows={1}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(_e, newValue, newPlain) => {
+            setValue(newValue);
+            setPlain(newPlain);
+          }}
           onKeyDown={onKeyDown}
-        />
+          onFocus={invalidateEntries}
+          allowSuggestionsAboveCursor
+        >
+          <Mention
+            trigger="@"
+            data={fileSuggestions}
+            markup="@[__display__](__id__)"
+            displayTransform={(_id, display) => `@${display}`}
+            appendSpaceOnAdd
+            className="chat-mention"
+          />
+        </MentionsInput>
         <div className="chat-send-group">
           <button className="chat-send" onClick={send} disabled={!canSend}>
             {streaming ? "…" : "Send"}
@@ -370,12 +421,18 @@ async function streamReply(
   onEvent: (ev: ChatEvent) => void,
   signal: AbortSignal,
   image?: string,
-  mode?: string
+  mode?: string,
+  visual?: VisualRegion
 ): Promise<void> {
   await fetchEventSource("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message, ...(image ? { image } : {}), ...(mode ? { mode } : {}) }),
+    body: JSON.stringify({
+      message,
+      ...(image ? { image } : {}),
+      ...(mode ? { mode } : {}),
+      ...(visual ? { visual } : {}),
+    }),
     signal,
     openWhenHidden: true, // local dev tool: don't drop the turn on a hidden tab
     async onopen(res) {

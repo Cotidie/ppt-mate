@@ -7,16 +7,24 @@ import type { Plugin, Connect } from "vite";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir, stat, mkdir, rename as renameFs, rm } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { query, createSdkMcpServer, tool, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
+import prettyBytes from "pretty-bytes";
+import mimeTypes from "mime-types";
+import { isBinary } from "istextorbinary";
+import open from "open";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
 const THEME_PATH = resolve(HERE, "theme.json");
 const OUT_DIR = resolve(HERE, "out");
+// The app's workspace: user/agent assets (generated images, uploaded PDFs, notes).
+// The agent sees the tree every turn but reads contents only on demand.
+const WORKSPACE_DIR = resolve(HERE, "files");
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
 const CREDS_PATH = resolve(homedir(), ".claude/.credentials.json");
@@ -59,6 +67,8 @@ export function deckApi(): Plugin {
     name: "deck-api",
     configureServer(server) {
       devServer = server;
+      // Always have a workspace directory so the explorer + agent tools work.
+      void mkdir(WORKSPACE_DIR, { recursive: true }).catch(() => {});
       server.middlewares.use("/api/slides/delete", handleDeleteSlide);
       server.middlewares.use("/api/slides/rename", handleRenameSlide);
       server.middlewares.use("/api/slides/edit", handleEditSlide);
@@ -68,6 +78,12 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/context", handleContext);
       server.middlewares.use("/api/render-result", handleRenderResult);
+      server.middlewares.use("/api/workspace/upload", handleWorkspaceUpload);
+      server.middlewares.use("/api/workspace/open", handleWorkspaceOpen);
+      server.middlewares.use("/api/workspace/mkdir", handleWorkspaceMkdir);
+      server.middlewares.use("/api/workspace/rename", handleWorkspaceRename);
+      server.middlewares.use("/api/workspace/remove", handleWorkspaceRemove);
+      server.middlewares.use("/api/workspace", handleWorkspace);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
       server.middlewares.use("/api/usage", handleUsage);
@@ -121,7 +137,7 @@ async function handleRenameSlide(req: IncomingMessage, res: ServerResponse, next
 async function handleChat(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
-    const { message, image, mode } = await readJsonBody(req);
+    const { message, image, mode, visual } = await readJsonBody(req);
     openEventStream(res);
     // A turn needs content. Typed prose counts; so does a non-default execution
     // mode (e.g. Fix Layout), whose prepended hint IS the instruction and which
@@ -133,7 +149,7 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, next: Conne
       res.end();
       return;
     }
-    await claude.runTurn(await composeTurn(typeof message === "string" ? message : "", image, mode), res);
+    await claude.runTurn(await composeTurn(typeof message === "string" ? message : "", image, mode, visual), res);
     sendEvent(res, "done", "");
     res.end();
   } catch (err) {
@@ -174,6 +190,291 @@ async function handleRenderResult(req: IncomingMessage, res: ServerResponse, nex
   }
 }
 
+// ---------------------------------------------------------------------------
+// Workspace: a `files/` tree the agent is always aware of (a compact manifest
+// rides each turn) but whose contents it reads only on demand (MCP tools below).
+// Single source of truth: the tree feeds the UI explorer, the turn manifest, and
+// the list_workspace tool.
+// ---------------------------------------------------------------------------
+type TreeNode = {
+  name: string;
+  path: string; // relative to files/, POSIX separators
+  type: "dir" | "file";
+  size?: number;
+  mtime?: number; // epoch ms
+  children?: TreeNode[];
+  truncated?: boolean; // dir had more entries than the cap
+  summary?: string; // reserved: future generated per-file summary (unused in v1)
+};
+
+const WS_MAX_DEPTH = 5;
+const WS_MAX_ENTRIES = 300;
+
+// Recursive readdir+stat under files/, depth- and entry-capped so a huge tree
+// can't blow up the response or the turn header. Dirs sorted before files.
+async function buildWorkspaceTree(): Promise<TreeNode> {
+  const root: TreeNode = { name: "files", path: "", type: "dir", children: [] };
+  let budget = WS_MAX_ENTRIES;
+  async function walk(absDir: string, relDir: string, depth: number): Promise<TreeNode[]> {
+    if (depth > WS_MAX_DEPTH || budget <= 0) return [];
+    let entries;
+    try {
+      entries = await readdir(absDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    entries.sort((a, b) => {
+      const ad = a.isDirectory() ? 0 : 1;
+      const bd = b.isDirectory() ? 0 : 1;
+      return ad - bd || a.name.localeCompare(b.name);
+    });
+    const out: TreeNode[] = [];
+    for (const e of entries) {
+      if (budget <= 0) {
+        out.push({ name: "…", path: relDir, type: "file", truncated: true });
+        break;
+      }
+      budget--;
+      const rel = relDir ? `${relDir}/${e.name}` : e.name;
+      const abs = resolve(absDir, e.name);
+      if (e.isDirectory()) {
+        out.push({ name: e.name, path: rel, type: "dir", children: await walk(abs, rel, depth + 1) });
+      } else if (e.isFile()) {
+        let size: number | undefined;
+        let mtime: number | undefined;
+        try {
+          const s = await stat(abs);
+          size = s.size;
+          mtime = s.mtimeMs;
+        } catch {
+          /* unreadable: list it without metadata */
+        }
+        out.push({ name: e.name, path: rel, type: "file", size, mtime });
+      }
+    }
+    return out;
+  }
+  root.children = await walk(WORKSPACE_DIR, "", 1);
+  return root;
+}
+
+// Flatten the tree to a compact one-line-per-entry manifest for the turn header.
+// Lists up to `limit` entries (dir-first, depth order), then "… N more". Never
+// includes file contents - just structure + metadata.
+function workspaceManifest(tree: TreeNode, limit = 60): string {
+  const lines: string[] = [];
+  let total = 0;
+  const walk = (nodes: TreeNode[] | undefined, depth: number) => {
+    for (const n of nodes ?? []) {
+      total++;
+      if (lines.length < limit) {
+        const indent = "  ".repeat(depth);
+        if (n.type === "dir") lines.push(`${indent}${n.name}/`);
+        else {
+          const meta = [n.size != null ? prettyBytes(n.size) : null, n.mtime ? fmtDate(n.mtime) : null]
+            .filter(Boolean)
+            .join(", ");
+          lines.push(`${indent}${n.name}${meta ? ` (${meta})` : ""}`);
+        }
+      }
+      if (n.type === "dir") walk(n.children, depth + 1);
+    }
+  };
+  walk(tree.children, 0);
+  if (!lines.length) return "[workspace] files/ is empty";
+  const more = total > limit ? `\n  … ${total - limit} more` : "";
+  return `[workspace] files/\n${lines.join("\n")}${more}`;
+}
+
+function fmtDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// Resolve a workspace-relative path to an absolute one, refusing anything that
+// escapes files/ (path traversal). Returns null if outside the sandbox.
+function resolveWorkspacePath(rel: string): string | null {
+  const abs = resolve(WORKSPACE_DIR, rel);
+  if (abs !== WORKSPACE_DIR && !abs.startsWith(WORKSPACE_DIR + "/")) return null;
+  return abs;
+}
+
+// GET /api/workspace -> the file tree (consumed by the explorer UI).
+async function handleWorkspace(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "GET") return next();
+  try {
+    const tree = await buildWorkspaceTree();
+    sendJson(res, 200, tree);
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// Shared skeleton for the POST workspace mutation routes: method guard, JSON
+// body parse, uniform 500 on throw. Each handler just maps a parsed body to a
+// { status, body } pair.
+type RouteResult = { status: number; body: unknown };
+
+function workspaceRoute(fn: (body: any) => Promise<RouteResult>) {
+  return async (req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
+    if (req.method !== "POST") return next();
+    try {
+      const { status, body } = await fn(await readJsonBody(req));
+      sendJson(res, status, body);
+    } catch (err) {
+      sendJson(res, 500, { error: String(err) });
+    }
+  };
+}
+
+// A single path segment is valid as a workspace file/folder name when it is
+// non-empty, not "."/".." and carries no separator or NUL. Returns the trimmed
+// name, or null if invalid.
+function validWorkspaceName(raw: unknown): string | null {
+  const name = String(raw ?? "").trim();
+  if (!name || name === "." || name === "..") return null;
+  if (name.includes("/") || name.includes("\\") || name.includes("\0")) return null;
+  return name;
+}
+
+// Workspace-relative child path under `parent` ("" = root).
+function childPath(parent: string, name: string): string {
+  return parent ? `${parent}/${name}` : name;
+}
+
+// POST /api/workspace/open { path } -> open a workspace file with the host's
+// default app (the dev server runs on the user's machine). Sandboxed to files/.
+// Only meaningful for local use (browser + dev server on the same host).
+const handleWorkspaceOpen = workspaceRoute(async ({ path }) => {
+  const abs = resolveWorkspacePath(String(path ?? ""));
+  if (!abs) return { status: 400, body: { error: `Path is outside the workspace: ${path}` } };
+  let info;
+  try {
+    info = await stat(abs);
+  } catch {
+    return { status: 404, body: { error: `No such workspace file: ${path}` } };
+  }
+  if (info.isDirectory()) return { status: 400, body: { error: "Cannot open a directory." } };
+  await open(abs); // launches the OS default app; we don't wait on the child
+  return { status: 200, body: { ok: true } };
+});
+
+// POST /api/workspace/mkdir { parent, name } -> create a folder inside files/.
+// `parent` is "" for the workspace root. Non-recursive so a duplicate surfaces.
+const handleWorkspaceMkdir = workspaceRoute(async ({ parent, name }) => {
+  const clean = validWorkspaceName(name);
+  if (!clean) return { status: 400, body: { error: "Invalid folder name." } };
+  const parentStr = String(parent ?? "");
+  if (!resolveWorkspacePath(parentStr)) return { status: 400, body: { error: "Parent is outside the workspace." } };
+  const target = resolveWorkspacePath(childPath(parentStr, clean));
+  if (!target) return { status: 400, body: { error: "Path is outside the workspace." } };
+  try {
+    await mkdir(target); // no recursive: EEXIST means it already exists
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      return { status: 409, body: { error: `"${clean}" already exists.` } };
+    }
+    throw e;
+  }
+  return { status: 200, body: { ok: true } };
+});
+
+// POST /api/workspace/rename { path, name } -> rename a file/folder in place
+// (same parent directory), to a new single-segment name. Sandboxed to files/.
+const handleWorkspaceRename = workspaceRoute(async ({ path, name }) => {
+  const clean = validWorkspaceName(name);
+  if (!clean) return { status: 400, body: { error: "Invalid name." } };
+  const abs = resolveWorkspacePath(String(path ?? ""));
+  if (!abs || abs === WORKSPACE_DIR) return { status: 400, body: { error: "Cannot rename this item." } };
+  try {
+    await stat(abs);
+  } catch {
+    return { status: 404, body: { error: `No such item: ${path}` } };
+  }
+  const slash = String(path).lastIndexOf("/");
+  const dir = slash >= 0 ? String(path).slice(0, slash) : "";
+  const target = resolveWorkspacePath(childPath(dir, clean));
+  if (!target) return { status: 400, body: { error: "Path is outside the workspace." } };
+  if (target !== abs) {
+    try {
+      await stat(target);
+      return { status: 409, body: { error: `"${clean}" already exists.` } };
+    } catch {
+      /* target free: proceed */
+    }
+  }
+  await renameFs(abs, target);
+  return { status: 200, body: { ok: true } };
+});
+
+// POST /api/workspace/remove { paths: string[] } -> delete files/folders inside
+// files/ (folders recursively). Sandboxed: if any path escapes files/ or is the
+// root, the whole batch is rejected. A missing path is ignored (force).
+const handleWorkspaceRemove = workspaceRoute(async ({ paths }) => {
+  const list = Array.isArray(paths) ? paths.map((p) => String(p)) : [];
+  if (!list.length) return { status: 400, body: { error: "Nothing to remove." } };
+  const targets: string[] = [];
+  for (const p of list) {
+    const abs = resolveWorkspacePath(p);
+    if (!abs || abs === WORKSPACE_DIR) return { status: 400, body: { error: `Cannot remove: ${p}` } };
+    targets.push(abs);
+  }
+  for (const abs of targets) await rm(abs, { recursive: true, force: true });
+  return { status: 200, body: { ok: true, removed: targets.length } };
+});
+
+const WS_MAX_UPLOAD = 25 * 1024 * 1024; // 25 MB per dropped file
+
+// Pick a free workspace-relative path under `parent` for `name`, auto-renaming
+// "file.ext" -> "file (1).ext", "file (2).ext"… on collision (Finder-style).
+// Returns the absolute + relative path, or null if it escapes the sandbox.
+async function uniqueChildPath(parent: string, name: string): Promise<{ abs: string; rel: string } | null> {
+  const dot = name.lastIndexOf(".");
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  for (let n = 0; n < 1000; n++) {
+    const candidate = n === 0 ? name : `${base} (${n})${ext}`;
+    const rel = childPath(parent, candidate);
+    const abs = resolveWorkspacePath(rel);
+    if (!abs || abs === WORKSPACE_DIR) return null;
+    try {
+      await stat(abs); // exists -> try the next suffix
+    } catch {
+      return { abs, rel }; // free
+    }
+  }
+  return null;
+}
+
+// POST /api/workspace/upload?parent=<dir>&name=<file> with the raw file bytes as
+// the body -> save a dropped file into files/. `parent` is "" for the root.
+// Binary-safe (raw Buffer body), sandboxed, size-capped, and auto-renames on a
+// name clash so a drop never overwrites or fails on duplicates.
+async function handleWorkspaceUpload(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const url = new URL(req.url ?? "", "http://localhost");
+    const clean = validWorkspaceName(url.searchParams.get("name"));
+    if (!clean) return sendJson(res, 400, { error: "Invalid file name." });
+    const parent = url.searchParams.get("parent") ?? "";
+    if (!resolveWorkspacePath(parent)) return sendJson(res, 400, { error: "Parent is outside the workspace." });
+    const free = await uniqueChildPath(parent, clean);
+    if (!free) return sendJson(res, 400, { error: "Path is outside the workspace." });
+    let buf: Buffer;
+    try {
+      buf = await readRawBody(req, WS_MAX_UPLOAD);
+    } catch (e) {
+      if ((e as Error).message === "TOO_LARGE") {
+        return sendJson(res, 413, { error: `File exceeds the ${prettyBytes(WS_MAX_UPLOAD)} limit.` });
+      }
+      throw e;
+    }
+    await writeFile(free.abs, buf);
+    sendJson(res, 200, { ok: true, path: free.rel });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
 // Content of one user turn: plain text, or text + image blocks (Anthropic
 // MessageParam content). Loosely typed; the SDK message is a MessageParam.
 type TurnContent = string | Array<Record<string, unknown>>;
@@ -194,16 +495,73 @@ const EXEC_HINTS: Record<string, string> = {
 // slide, selection, any render issues) without having to call a tool. Full detail
 // still comes from the `deck` MCP tools. When the Visual Selection tool attached a
 // crop, ride it along as an image block so the agent sees the region beside the text.
-async function composeTurn(message: string, image?: string, mode?: string): Promise<TurnContent> {
+async function composeTurn(message: string, image?: string, mode?: string, visual?: unknown): Promise<TurnContent> {
   const header = await contextHeader();
   const hint = mode ? EXEC_HINTS[mode] ?? "" : "";
-  const text = [header, hint, message].filter(Boolean).join("\n\n");
+  const region = formatVisualRegion(visual);
+  // Always make the agent aware of the workspace structure (tree only, no
+  // contents); it reads files on demand via the read_workspace_file tool.
+  let workspace = "";
+  try {
+    workspace = workspaceManifest(await buildWorkspaceTree());
+  } catch {
+    /* workspace unreadable: skip the manifest */
+  }
+  const refs = await referencedFiles(message);
+  const text = [header, workspace, refs, region, hint, message].filter(Boolean).join("\n\n");
   if (!image) return text;
   const data = image.replace(/^data:image\/\w+;base64,/, "");
+  const note = region
+    ? "(Attached: a crop of exactly the [visual region] above; use those coordinates even if the crop is blank.)"
+    : "(Attached: a visual crop of the slide region the user selected; inspect it.)";
   return [
-    { type: "text", text: `${text}\n\n(Attached: a visual crop of the slide region the user selected; inspect it.)` },
+    { type: "text", text: `${text}\n\n${note}` },
     { type: "image", source: { type: "base64", media_type: "image/png", data } },
   ];
+}
+
+// Render a VisualRegion (from the client's selection box) as an explicit,
+// agent-readable block: a one-line header, the structured JSON, and how to use
+// it. Defensive about shape (the value is whatever the chat body carried).
+function formatVisualRegion(visual: unknown): string {
+  const v = visual as Partial<{
+    canvas: { w: number; h: number };
+    rect: { x: number; y: number; w: number; h: number };
+    center: { x: number; y: number };
+    zone: string;
+  }> | null | undefined;
+  const r = v?.rect;
+  if (!r || typeof r.x !== "number" || typeof r.w !== "number") return "";
+  const cw = v.canvas?.w ?? 13.333;
+  const ch = v.canvas?.h ?? 7.5;
+  const json = JSON.stringify({ rect: r, center: v.center, zone: v.zone });
+  return (
+    `[visual region] The user drew a selection box on the active slide. ` +
+    `Units: inches, origin top-left, canvas ${cw}x${ch}in.\n${json}\n` +
+    `Use these coordinates to place or edit elements there even if the crop looks blank.`
+  );
+}
+
+// Resolve "@path" mentions in a user message (from the chat file picker) to an
+// explicit, validated reference line so the agent points at the exact file or
+// folder. Only paths that actually exist in the workspace survive, which drops
+// false positives like email addresses or stray "@words".
+async function referencedFiles(message: string): Promise<string> {
+  const seen = new Set<string>();
+  for (const m of message.matchAll(/(?:^|\s)@([\w./-]+)/g)) {
+    const rel = m[1].replace(/[.,;:)]+$/, "").replace(/\/+$/, ""); // trim trailing punctuation / slash
+    if (!rel || seen.has(rel)) continue;
+    const abs = resolveWorkspacePath(rel);
+    if (!abs || abs === WORKSPACE_DIR) continue;
+    try {
+      const st = await stat(abs);
+      if (st.isFile() || st.isDirectory()) seen.add(rel);
+    } catch {
+      /* not a real workspace entry: ignore */
+    }
+  }
+  if (!seen.size) return "";
+  return `[referenced files] ${[...seen].join(", ")}`;
 }
 
 async function contextHeader(): Promise<string> {
@@ -443,6 +801,46 @@ const deckMcp = createSdkMcpServer({
           return textResult({ error: "Couldn't capture the slide - is the preview open in the browser?" });
         }
         return imageResult(dataUrl);
+      },
+    ),
+    tool(
+      "list_workspace",
+      "List the workspace (the files/ directory): the full file tree with metadata (name, type, size, modified time). The agent is already given a compact version of this each turn; call this when you want the complete, current tree.",
+      {},
+      async () => {
+        const tree = await buildWorkspaceTree();
+        return textResult(tree);
+      },
+    ),
+    tool(
+      "read_workspace_file",
+      "Read one file from the workspace (files/) by its relative path (e.g. \"notes/example.md\"). Text files return their text; images return a viewable image. Use this only when you actually need a file's contents - the tree alone is given to you every turn.",
+      { path: z.string().describe("Path relative to the files/ workspace directory, e.g. \"notes/example.md\".") },
+      async ({ path }) => {
+        const abs = resolveWorkspacePath(path);
+        if (!abs) return textResult({ error: `Path is outside the workspace: ${path}` });
+        let info;
+        try {
+          info = await stat(abs);
+        } catch {
+          return textResult({ error: `No such workspace file: ${path}` });
+        }
+        if (info.isDirectory()) return textResult({ error: `${path} is a directory; use list_workspace.` });
+        // Anthropic image blocks only accept these media types; mime-types maps the
+        // extension. Any other image (e.g. svg) falls through to the text path.
+        const mime = String(mimeTypes.lookup(path) || "");
+        const SUPPORTED_IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+        if (SUPPORTED_IMAGE.has(mime)) {
+          const b64 = (await readFile(abs)).toString("base64");
+          return { content: [{ type: "image" as const, data: b64, mimeType: mime }] };
+        }
+        const MAX_TEXT = 200_000; // ~200KB cap; bigger/binary files aren't dumped
+        if (info.size > MAX_TEXT) {
+          return textResult({ error: `${path} is ${prettyBytes(info.size)}; too large to read inline.` });
+        }
+        const buf = await readFile(abs);
+        if (isBinary(path, buf)) return textResult({ error: `${path} looks binary; not shown.` });
+        return textResult({ path, size: info.size, content: buf.toString("utf8") });
       },
     ),
   ],
@@ -899,6 +1297,29 @@ function readJsonBody(req: IncomingMessage): Promise<any> {
         reject(e);
       }
     });
+    req.on("error", reject);
+  });
+}
+
+// Binary-safe request body reader (Buffer chunks, not string concat), aborting
+// once `maxBytes` is exceeded. Used for file uploads; rejects with "TOO_LARGE".
+function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let over = false;
+    req.on("data", (chunk: Buffer) => {
+      if (over) return; // already rejected; drain the rest so the response can flush
+      size += chunk.length;
+      if (size > maxBytes) {
+        over = true;
+        req.resume(); // discard remaining bytes without tearing down the socket
+        reject(new Error("TOO_LARGE"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
