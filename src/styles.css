@@ -311,6 +311,21 @@ body.gesture-active * {
   color: #6b7280;
 }
 
+/* react-accessible-treeview renders ul[role=tree] / li[role=treeitem]; strip the
+   default list chrome so our row renderer controls the look. */
+.files-tree,
+.files-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.files-tree li:focus {
+  outline: none;
+}
+.files-tree li:focus > .files-row {
+  background: #2d3950;
+}
+
 .files-row {
   display: flex;
   align-items: center;

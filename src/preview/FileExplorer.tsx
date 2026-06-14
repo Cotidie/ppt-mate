@@ -1,9 +1,13 @@
 // Workspace file explorer for the lower left rail (VS Code-style). Renders the
-// `files/` tree from GET /api/workspace as a collapsible nested list. Read-only
-// for now: clicking a file is a stub for a future preview, and the body carries a
-// stable drop-target class for future drag-and-drop uploads.
+// `files/` tree from GET /api/workspace. The tree widget itself is
+// react-accessible-treeview, which provides the ARIA tree roles, keyboard
+// navigation, and expand/collapse state - we only supply the data and a row
+// renderer. Read-only for now: a file click is a stub for a future preview, and
+// the body carries a stable drop-target class for future drag-and-drop uploads.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import TreeView, { flattenTree, type INode } from "react-accessible-treeview";
+import prettyBytes from "pretty-bytes";
 
 export type TreeNode = {
   name: string;
@@ -12,8 +16,18 @@ export type TreeNode = {
   size?: number;
   mtime?: number;
   children?: TreeNode[];
-  truncated?: boolean;
 };
+
+type Meta = { path: string; type: "dir" | "file"; size?: number };
+
+// Map our server tree into the {name, children, metadata} shape flattenTree wants.
+function toInput(node: TreeNode): { name: string; metadata: Meta; children?: ReturnType<typeof toInput>[] } {
+  return {
+    name: node.name,
+    metadata: { path: node.path, type: node.type, size: node.size },
+    children: node.children?.map(toInput),
+  };
+}
 
 export function FileExplorer() {
   const [tree, setTree] = useState<TreeNode | null>(null);
@@ -34,6 +48,13 @@ export function FileExplorer() {
   }, [refresh]);
 
   const roots = tree?.children ?? [];
+  // flattenTree always emits a (hidden) root as element 0; the visible items are
+  // its children. Expand the top-level folders by default.
+  const data = useMemo(() => flattenTree({ name: "", children: roots.map(toInput) }), [tree]);
+  const defaultExpandedIds = useMemo(
+    () => data.filter((n) => n.parent === 0 && n.children.length > 0).map((n) => n.id),
+    [data],
+  );
 
   return (
     <div className="files-panel">
@@ -51,46 +72,50 @@ export function FileExplorer() {
         ) : roots.length === 0 ? (
           <div className="files-empty">No files yet</div>
         ) : (
-          roots.map((n) => <Node key={n.path} node={n} depth={0} />)
+          <TreeView
+            data={data}
+            className="files-tree"
+            aria-label="Workspace files"
+            defaultExpandedIds={defaultExpandedIds}
+            nodeRenderer={({ element, isBranch, isExpanded, getNodeProps, level }) => (
+              <FileRow element={element} isBranch={isBranch} isExpanded={isExpanded} level={level} getNodeProps={getNodeProps} />
+            )}
+          />
         )}
       </div>
     </div>
   );
 }
 
-function Node({ node, depth }: { node: TreeNode; depth: number }) {
-  const [open, setOpen] = useState(depth < 1); // top level expanded by default
-  const pad = { paddingLeft: 8 + depth * 12 } as const;
-
-  if (node.type === "dir") {
-    return (
-      <div>
-        <button className="files-row files-dir" style={pad} onClick={() => setOpen((o) => !o)}>
-          <span className={"files-caret" + (open ? " open" : "")}>›</span>
-          <span className="files-name">{node.name}</span>
-        </button>
-        {open && node.children?.map((c) => <Node key={c.path} node={c} depth={depth + 1} />)}
-      </div>
-    );
-  }
-
+function FileRow({
+  element,
+  isBranch,
+  isExpanded,
+  level,
+  getNodeProps,
+}: {
+  element: INode;
+  isBranch: boolean;
+  isExpanded: boolean;
+  level: number;
+  getNodeProps: () => React.HTMLAttributes<HTMLDivElement>;
+}) {
+  const meta = element.metadata as Meta | undefined;
+  const title = meta ? meta.path + (meta.size != null ? ` · ${prettyBytes(meta.size)}` : "") : element.name;
   return (
-    <button
-      className="files-row files-file"
-      style={pad}
-      data-path={node.path}
-      title={node.path + (node.size != null ? ` · ${fmtBytes(node.size)}` : "")}
-      // Future: open a preview pane for this file (read_workspace_file).
-      onClick={() => {}}
+    <div
+      {...getNodeProps()}
+      className={"files-row " + (isBranch ? "files-dir" : "files-file")}
+      style={{ paddingLeft: 8 + (level - 1) * 12 }}
+      title={title}
+      data-path={meta?.path}
     >
-      <span className="files-icon" aria-hidden="true" />
-      <span className="files-name">{node.name}</span>
-    </button>
+      {isBranch ? (
+        <span className={"files-caret" + (isExpanded ? " open" : "")}>›</span>
+      ) : (
+        <span className="files-icon" aria-hidden="true" />
+      )}
+      <span className="files-name">{element.name}</span>
+    </div>
   );
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }

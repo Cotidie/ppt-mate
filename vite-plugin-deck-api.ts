@@ -13,6 +13,9 @@ import { spawn } from "node:child_process";
 import { query, createSdkMcpServer, tool, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import prettyBytes from "pretty-bytes";
+import mimeTypes from "mime-types";
+import { isBinary } from "istextorbinary";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
@@ -262,7 +265,7 @@ function workspaceManifest(tree: TreeNode, limit = 60): string {
         const indent = "  ".repeat(depth);
         if (n.type === "dir") lines.push(`${indent}${n.name}/`);
         else {
-          const meta = [n.size != null ? fmtBytes(n.size) : null, n.mtime ? fmtDate(n.mtime) : null]
+          const meta = [n.size != null ? prettyBytes(n.size) : null, n.mtime ? fmtDate(n.mtime) : null]
             .filter(Boolean)
             .join(", ");
           lines.push(`${indent}${n.name}${meta ? ` (${meta})` : ""}`);
@@ -275,12 +278,6 @@ function workspaceManifest(tree: TreeNode, limit = 60): string {
   if (!lines.length) return "[workspace] files/ is empty";
   const more = total > limit ? `\n  … ${total - limit} more` : "";
   return `[workspace] files/\n${lines.join("\n")}${more}`;
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n}B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 function fmtDate(ms: number): string {
@@ -608,22 +605,20 @@ const deckMcp = createSdkMcpServer({
           return textResult({ error: `No such workspace file: ${path}` });
         }
         if (info.isDirectory()) return textResult({ error: `${path} is a directory; use list_workspace.` });
-        const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
-        const imageMime: Record<string, string> = {
-          ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-          ".gif": "image/gif", ".webp": "image/webp",
-        };
-        if (imageMime[ext]) {
+        // Anthropic image blocks only accept these media types; mime-types maps the
+        // extension. Any other image (e.g. svg) falls through to the text path.
+        const mime = String(mimeTypes.lookup(path) || "");
+        const SUPPORTED_IMAGE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+        if (SUPPORTED_IMAGE.has(mime)) {
           const b64 = (await readFile(abs)).toString("base64");
-          return { content: [{ type: "image" as const, data: b64, mimeType: imageMime[ext] }] };
+          return { content: [{ type: "image" as const, data: b64, mimeType: mime }] };
         }
         const MAX_TEXT = 200_000; // ~200KB cap; bigger/binary files aren't dumped
         if (info.size > MAX_TEXT) {
-          return textResult({ error: `${path} is ${fmtBytes(info.size)}; too large to read inline.` });
+          return textResult({ error: `${path} is ${prettyBytes(info.size)}; too large to read inline.` });
         }
         const buf = await readFile(abs);
-        // Heuristic binary guard: a NUL byte means it isn't text.
-        if (buf.includes(0)) return textResult({ error: `${path} looks binary; not shown.` });
+        if (isBinary(path, buf)) return textResult({ error: `${path} looks binary; not shown.` });
         return textResult({ path, size: info.size, content: buf.toString("utf8") });
       },
     ),
