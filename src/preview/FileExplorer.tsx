@@ -8,10 +8,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import TreeView from "react-accessible-treeview";
-import { type TreeNode, dirOf, flattenRoots, injectPlaceholder, pathOf, NEW_SENTINEL } from "./workspaceTree";
+import { type Meta, type TreeNode, dirOf, flattenRoots, injectPlaceholder, pathOf, NEW_SENTINEL } from "./workspaceTree";
 import { fetchTree, mkdir, openFile, removePaths, renamePath } from "./workspaceApi";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
 import { useWorkspaceExpansion } from "./useWorkspaceExpansion";
+import { useWorkspaceDrop } from "./useWorkspaceDrop";
 import { useInlineEdit } from "./useInlineEdit";
 import { FileRow, NameInput } from "./FileRow";
 import { NewFolderIcon, TrashIcon } from "./fileIcons";
@@ -50,6 +51,7 @@ export function FileExplorer() {
 
   const sel = useWorkspaceSelection(data);
   const expand = useWorkspaceExpansion(roots, data);
+  const drop = useWorkspaceDrop({ refresh, setExpanded: expand.setExpanded, setError });
 
   // Every mutation follows the same choreography: run it, surface an error or
   // clear the banner and refresh. Returns whether it succeeded.
@@ -134,7 +136,10 @@ export function FileExplorer() {
           {error}
         </div>
       )}
-      <div className="files-body rail-files-drop">
+      <div
+        className={"files-body rail-files-drop" + (drop.dropTarget === "" ? " drop-target" : "")}
+        {...drop.bodyHandlers}
+      >
         {loadError ? (
           <div className="files-empty">Workspace unavailable</div>
         ) : roots.length === 0 && !creating ? (
@@ -185,6 +190,11 @@ export function FileExplorer() {
                   level={level}
                   getNodeProps={getNodeProps}
                   editing={inline.isRenaming(pathOf(element) ?? "")}
+                  dragHandlers={drop.rowHandlers(element.metadata as Meta)}
+                  isDropTarget={
+                    (element.metadata as Meta).type === "dir" &&
+                    drop.dropTarget === (element.metadata as Meta).path
+                  }
                   onOpen={openFile}
                   onBeginRename={(path) => {
                     setError(null);

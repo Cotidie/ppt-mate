@@ -78,6 +78,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/context", handleContext);
       server.middlewares.use("/api/render-result", handleRenderResult);
+      server.middlewares.use("/api/workspace/upload", handleWorkspaceUpload);
       server.middlewares.use("/api/workspace/open", handleWorkspaceOpen);
       server.middlewares.use("/api/workspace/mkdir", handleWorkspaceMkdir);
       server.middlewares.use("/api/workspace/rename", handleWorkspaceRename);
@@ -420,6 +421,59 @@ const handleWorkspaceRemove = workspaceRoute(async ({ paths }) => {
   for (const abs of targets) await rm(abs, { recursive: true, force: true });
   return { status: 200, body: { ok: true, removed: targets.length } };
 });
+
+const WS_MAX_UPLOAD = 25 * 1024 * 1024; // 25 MB per dropped file
+
+// Pick a free workspace-relative path under `parent` for `name`, auto-renaming
+// "file.ext" -> "file (1).ext", "file (2).ext"… on collision (Finder-style).
+// Returns the absolute + relative path, or null if it escapes the sandbox.
+async function uniqueChildPath(parent: string, name: string): Promise<{ abs: string; rel: string } | null> {
+  const dot = name.lastIndexOf(".");
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  for (let n = 0; n < 1000; n++) {
+    const candidate = n === 0 ? name : `${base} (${n})${ext}`;
+    const rel = childPath(parent, candidate);
+    const abs = resolveWorkspacePath(rel);
+    if (!abs || abs === WORKSPACE_DIR) return null;
+    try {
+      await stat(abs); // exists -> try the next suffix
+    } catch {
+      return { abs, rel }; // free
+    }
+  }
+  return null;
+}
+
+// POST /api/workspace/upload?parent=<dir>&name=<file> with the raw file bytes as
+// the body -> save a dropped file into files/. `parent` is "" for the root.
+// Binary-safe (raw Buffer body), sandboxed, size-capped, and auto-renames on a
+// name clash so a drop never overwrites or fails on duplicates.
+async function handleWorkspaceUpload(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const url = new URL(req.url ?? "", "http://localhost");
+    const clean = validWorkspaceName(url.searchParams.get("name"));
+    if (!clean) return sendJson(res, 400, { error: "Invalid file name." });
+    const parent = url.searchParams.get("parent") ?? "";
+    if (!resolveWorkspacePath(parent)) return sendJson(res, 400, { error: "Parent is outside the workspace." });
+    const free = await uniqueChildPath(parent, clean);
+    if (!free) return sendJson(res, 400, { error: "Path is outside the workspace." });
+    let buf: Buffer;
+    try {
+      buf = await readRawBody(req, WS_MAX_UPLOAD);
+    } catch (e) {
+      if ((e as Error).message === "TOO_LARGE") {
+        return sendJson(res, 413, { error: `File exceeds the ${prettyBytes(WS_MAX_UPLOAD)} limit.` });
+      }
+      throw e;
+    }
+    await writeFile(free.abs, buf);
+    sendJson(res, 200, { ok: true, path: free.rel });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
 
 // Content of one user turn: plain text, or text + image blocks (Anthropic
 // MessageParam content). Loosely typed; the SDK message is a MessageParam.
@@ -1194,6 +1248,29 @@ function readJsonBody(req: IncomingMessage): Promise<any> {
         reject(e);
       }
     });
+    req.on("error", reject);
+  });
+}
+
+// Binary-safe request body reader (Buffer chunks, not string concat), aborting
+// once `maxBytes` is exceeded. Used for file uploads; rejects with "TOO_LARGE".
+function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let over = false;
+    req.on("data", (chunk: Buffer) => {
+      if (over) return; // already rejected; drain the rest so the response can flush
+      size += chunk.length;
+      if (size > maxBytes) {
+        over = true;
+        req.resume(); // discard remaining bytes without tearing down the socket
+        reject(new Error("TOO_LARGE"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }

@@ -3,7 +3,7 @@
 // <input> inside the node (its recommended pattern).
 
 import { useEffect, useRef } from "react";
-import type { HTMLAttributes, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { DragEvent as ReactDragEvent, HTMLAttributes, KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { INode } from "react-accessible-treeview";
 import prettyBytes from "pretty-bytes";
 import { type Meta } from "./workspaceTree";
@@ -15,6 +15,8 @@ export function FileRow({
   level,
   getNodeProps,
   editing,
+  dragHandlers,
+  isDropTarget,
   onOpen,
   onBeginRename,
   onCommitRename,
@@ -25,6 +27,12 @@ export function FileRow({
   level: number;
   getNodeProps: () => HTMLAttributes<HTMLDivElement>;
   editing: boolean;
+  dragHandlers?: {
+    onDragOver: (e: ReactDragEvent) => void;
+    onDragLeave: (e: ReactDragEvent) => void;
+    onDrop: (e: ReactDragEvent) => void;
+  };
+  isDropTarget?: boolean;
   onOpen: (path: string) => void;
   onBeginRename: (path: string) => void;
   onCommitRename: (path: string, name: string) => void;
@@ -38,7 +46,10 @@ export function FileRow({
   return (
     <div
       {...getNodeProps()}
-      className={"files-row " + (isDir ? "files-dir" : "files-file")}
+      {...dragHandlers}
+      className={
+        "files-row " + (isDir ? "files-dir" : "files-file") + (isDropTarget ? " drop-target" : "")
+      }
       style={{ paddingLeft: 8 + (level - 1) * 12 }}
       title={editing ? undefined : title}
       data-path={path}

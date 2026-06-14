@@ -414,6 +414,18 @@ body.gesture-active * {
   background: #2d3950;
 }
 
+/* Active drag-and-drop target: a folder row the cursor is over (files drop into
+   it), or the panel body for a root-level drop. Accent ring + faint fill. */
+.files-row.drop-target,
+.files-body.drop-target {
+  outline: 1px dashed #3b6fd4;
+  outline-offset: -2px;
+  background: #243049;
+}
+.files-body.drop-target {
+  border-radius: 6px;
+}
+
 /* Rename pencil: pinned to the row's far right (margin-left:auto), space reserved
    so the name's width doesn't jump; revealed on row hover or treeitem focus. */
 .files-rename {

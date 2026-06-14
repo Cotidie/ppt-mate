@@ -30,6 +30,34 @@ export async function removePaths(paths: string[]): Promise<string | null> {
   return post("/api/workspace/remove", { paths });
 }
 
+// Upload one dropped file into `parent` ("" = root). The bytes ride as the raw
+// request body; the server sandboxes, size-caps, and auto-renames on a clash.
+export async function uploadFile(parent: string, file: File): Promise<string | null> {
+  const q = `parent=${encodeURIComponent(parent)}&name=${encodeURIComponent(file.name)}`;
+  try {
+    const r = await fetch(`/api/workspace/upload?${q}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: file,
+    });
+    if (r.ok) return null;
+    const j = await r.json().catch(() => null);
+    return j?.error ?? `Could not upload ${file.name}.`;
+  } catch {
+    return "Dev server unavailable.";
+  }
+}
+
+// Upload several files into `parent`, attempting all; returns the first error.
+export async function uploadFiles(parent: string, files: File[]): Promise<string | null> {
+  let firstError: string | null = null;
+  for (const file of files) {
+    const err = await uploadFile(parent, file);
+    if (err && !firstError) firstError = err;
+  }
+  return firstError;
+}
+
 async function post(url: string, body: unknown): Promise<string | null> {
   try {
     const r = await fetch(url, {
