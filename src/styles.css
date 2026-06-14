@@ -789,8 +789,15 @@ body.gesture-active * {
   border: 1px solid #5a2d33;
 }
 
-/* Thinking indicator: three dots bouncing in sequence inside the in-flight
-   assistant bubble until the first token streams in. */
+/* Thinking indicator row: sits just under the (possibly still-growing) assistant
+   bubble and stays until the whole turn finishes, so multi-step turns that pause
+   to call tools keep showing activity. */
+.chat-typing-row {
+  align-self: flex-start;
+  padding: 2px 9px;
+}
+
+/* Three dots bouncing in sequence. */
 .typing {
   display: inline-flex;
   align-items: center;

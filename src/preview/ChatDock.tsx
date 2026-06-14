@@ -137,11 +137,23 @@ export function ChatDock() {
       <AccountPanel account={account} stats={stats} usage={usage} />
       <div className="chat-col">
       <div className="chat-log" ref={logRef}>
-        {messages.map((m, i) => (
-          <div key={i} className={"chat-msg chat-" + m.role}>
-            {m.text || (streaming && i === messages.length - 1 ? <TypingDots /> : "")}
+        {messages.map((m, i) =>
+          // The in-flight assistant bubble is empty until the first token; don't
+          // render it yet - the thinking row below stands in for it.
+          m.text ? (
+            <div key={i} className={"chat-msg chat-" + m.role}>
+              {m.text}
+            </div>
+          ) : null,
+        )}
+        {/* Multi-step turns stream text, call tools, then stream more. Keep the
+            indicator under the bubble until the turn is truly done (streaming off),
+            not just until the first token. */}
+        {streaming && (
+          <div className="chat-typing-row">
+            <TypingDots />
           </div>
-        ))}
+        )}
       </div>
       <AgentContextBar />
       <div className="chat-input-row">
