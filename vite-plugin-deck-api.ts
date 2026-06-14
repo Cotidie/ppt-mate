@@ -123,6 +123,15 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, next: Conne
   try {
     const { message, image, mode } = await readJsonBody(req);
     openEventStream(res);
+    // Require real user content. An execution mode (e.g. Fix Layout) prepends a
+    // hint, which would otherwise make a blank message a non-empty turn that runs
+    // the skill on the active slide. Guard here so no mode can run on empty input.
+    if (typeof message !== "string" || !message.trim()) {
+      sendEvent(res, "error", JSON.stringify("Type a message to send."));
+      sendEvent(res, "done", "");
+      res.end();
+      return;
+    }
     await claude.runTurn(await composeTurn(message, image, mode), res);
     sendEvent(res, "done", "");
     res.end();
