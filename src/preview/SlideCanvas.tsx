@@ -8,7 +8,7 @@ import { theme, PX_PER_IN } from "../theme/theme";
 import { ElementView } from "./Element";
 import { SelectionContext, useSelectionState } from "./selection";
 import { useMode } from "./mode";
-import { reportContext, setPendingVisual, clearPendingVisual, useAgentContext, type RenderFact, type TextSel, type Rect } from "./agentContext";
+import { reportContext, setPendingVisual, clearPendingVisual, setSlideCapturer, useAgentContext, type RenderFact, type TextSel, type Rect } from "./agentContext";
 import * as htmlToImage from "html-to-image";
 
 const STAGE_W = theme.canvas.w * PX_PER_IN; // 1280
@@ -85,6 +85,13 @@ export function SlideCanvas({
   useEffect(() => {
     setClaudeSel({ keys: [], text: null });
   }, [slide.id]);
+
+  // Let the agent render this slide on demand (the render_slide tool, driven over
+  // the chat turn's SSE stream). Registered while this canvas is mounted.
+  useEffect(() => {
+    setSlideCapturer(() => captureStage(stageRef.current));
+    return () => setSlideCapturer(null);
+  }, []);
 
   // Select mode: capture what the user picks for Claude. A non-empty native text
   // selection inside an element becomes a text range; a plain click selects the
@@ -324,18 +331,36 @@ export function SlideCanvas({
 
 export const STAGE = { w: STAGE_W, h: STAGE_H };
 
-// Rasterize the stage (at native 1280x720, CSS scale neutralized) and crop to the
-// region (unscaled stage px) into a PNG, then hand it to the chat path. 2x pixel
-// ratio so small regions stay legible for the model.
-async function captureRegion(stageEl: HTMLElement, r: Rect): Promise<void> {
-  const ratio = 2;
+const CAPTURE_RATIO = 2; // 2x pixel ratio so small regions/text stay legible for the model.
+
+// Rasterize the whole stage at native 1280x720 (CSS scale neutralized) to a canvas.
+// Shared by the Visual Selection crop and the agent's full-slide render.
+function captureStageCanvas(stageEl: HTMLElement): Promise<HTMLCanvasElement> {
+  return htmlToImage.toCanvas(stageEl, {
+    pixelRatio: CAPTURE_RATIO,
+    width: STAGE_W,
+    height: STAGE_H,
+    style: { transform: "none", transformOrigin: "top left" },
+  });
+}
+
+// Full-slide PNG dataURL of the current stage, for the agent's render_slide tool.
+async function captureStage(stageEl: HTMLElement | null): Promise<string | null> {
+  if (!stageEl) return null;
   try {
-    const full = await htmlToImage.toCanvas(stageEl, {
-      pixelRatio: ratio,
-      width: STAGE_W,
-      height: STAGE_H,
-      style: { transform: "none", transformOrigin: "top left" },
-    });
+    return (await captureStageCanvas(stageEl)).toDataURL("image/png");
+  } catch (err) {
+    console.error("Slide capture failed", err);
+    return null;
+  }
+}
+
+// Rasterize the stage and crop to the region (unscaled stage px) into a PNG, then
+// hand it to the chat path.
+async function captureRegion(stageEl: HTMLElement, r: Rect): Promise<void> {
+  const ratio = CAPTURE_RATIO;
+  try {
+    const full = await captureStageCanvas(stageEl);
     const c = document.createElement("canvas");
     c.width = Math.round(r.w * ratio);
     c.height = Math.round(r.h * ratio);

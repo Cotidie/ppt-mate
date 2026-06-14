@@ -67,6 +67,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/context", handleContext);
+      server.middlewares.use("/api/render-result", handleRenderResult);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
       server.middlewares.use("/api/usage", handleUsage);
@@ -138,6 +139,25 @@ async function handleContext(req: IncomingMessage, res: ServerResponse, next: Co
   try {
     const body = await readJsonBody(req);
     Object.assign(uiContext, body);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// The browser answers a `render-request` here with the captured slide PNG,
+// resolving the render_slide tool's parked promise. Fire-and-forget from the
+// client; a late/unknown id is ignored (already timed out).
+async function handleRenderResult(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { requestId, image } = await readJsonBody(req);
+    const pending = pendingRenders.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingRenders.delete(requestId);
+      pending.resolve(typeof image === "string" && image ? image : null);
+    }
     sendJson(res, 200, { ok: true });
   } catch (err) {
     sendJson(res, 500, { error: String(err) });
@@ -309,6 +329,13 @@ const textResult = (obj: unknown): ToolText => ({
   content: [{ type: "text", text: JSON.stringify(obj, null, 2) }],
 });
 
+// An image tool result the model can view. `dataUrl` is a PNG data URL from the
+// client capture; strip the prefix to the bare base64 the MCP image block wants.
+type ToolImage = { content: { type: "image"; data: string; mimeType: string }[] };
+const imageResult = (dataUrl: string): ToolImage => ({
+  content: [{ type: "image", data: dataUrl.replace(/^data:image\/\w+;base64,/, ""), mimeType: "image/png" }],
+});
+
 // Resolve a slide to positioned Elements (inches) via the shared layout engine.
 async function resolveElements(slide: unknown, footer: string): Promise<unknown[]> {
   if (!devServer) return [];
@@ -332,7 +359,8 @@ const deckMcp = createSdkMcpServer({
   version: "1.0.0",
   instructions:
     "Inspect the live slide editor: the active slide with resolved geometry, the " +
-    "current selection, and the design system. Read-only; edit deck.json to change slides.",
+    "current selection, and the design system. Use render_slide to actually SEE the " +
+    "slide as a rendered image. Read-only; edit deck.json to change slides.",
   tools: [
     tool(
       "get_active_slide",
@@ -383,8 +411,25 @@ const deckMcp = createSdkMcpServer({
         return textResult({ theme, spec: "design/DESIGN.md" });
       },
     ),
+    tool(
+      "render_slide",
+      "Render the slide the user is currently viewing to an image and look at it. Returns a pixel-faithful PNG of the live preview (the same fonts/layout the user sees). Use this to judge visual problems geometry alone can't show: overlaps, cut-off text, low contrast, uneven spacing, misalignment. Re-call after an edit to verify the fix.",
+      {},
+      async () => {
+        const dataUrl = await claude.requestClientRender();
+        if (!dataUrl) {
+          return textResult({ error: "Couldn't capture the slide - is the preview open in the browser?" });
+        }
+        return imageResult(dataUrl);
+      },
+    ),
   ],
 });
+
+// Pending render requests keyed by id: the render_slide tool parks a promise here
+// and the browser resolves it via POST /api/render-result with the captured PNG.
+const pendingRenders = new Map<string, { resolve: (v: string | null) => void; timer: ReturnType<typeof setTimeout> }>();
+const RENDER_TIMEOUT_MS = 8000;
 
 // A single persistent Claude Agent SDK session per dev server, driven in
 // streaming-input mode: one long-lived `query` whose prompt is a pushable stream,
@@ -499,6 +544,23 @@ class ClaudeSession {
     this.q = undefined;
     this.input = undefined;
     this.failTurn("Claude session ended.");
+  }
+
+  // Ask the browser to rasterize the slide it is showing and send the PNG back.
+  // Emits a `render-request` SSE event on the active turn's stream; the client
+  // POSTs to /api/render-result, which resolves the parked promise. Resolves null
+  // if no turn is live or the client doesn't answer within the timeout.
+  requestClientRender(): Promise<string | null> {
+    if (!this.activeRes) return Promise.resolve(null);
+    const requestId = `r${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => {
+        pendingRenders.delete(requestId);
+        resolve(null);
+      }, RENDER_TIMEOUT_MS);
+      pendingRenders.set(requestId, { resolve, timer });
+      this.send("render-request", JSON.stringify({ requestId }));
+    });
   }
 
   private failTurn(reason: string): void {

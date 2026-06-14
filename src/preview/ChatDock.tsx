@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 import { AgentContextBar } from "./AgentContextBar";
-import { getPendingVisual, clearPendingVisual } from "./agentContext";
+import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -337,6 +337,10 @@ async function streamReply(
       throw new Error(`Chat failed (${res.status}). Is the dev server running?`);
     },
     onmessage(ev) {
+      if (ev.event === "render-request") {
+        handleRenderRequest(ev.data);
+        return; // a side effect (capture + POST back), not a chat message
+      }
       const parsed = toEvent(ev.event, ev.data);
       if (parsed) onEvent(parsed);
     },
@@ -348,6 +352,26 @@ async function streamReply(
       throw err; // a real failure: stop, don't auto-retry against a dead server
     },
   });
+}
+
+// The agent's render_slide tool asks (mid-turn) for a render of the active slide.
+// Capture the live stage to a PNG and POST it back so the tool result can resolve.
+// Fire-and-forget: a failure just lets the server's render timeout return null.
+function handleRenderRequest(data: string): void {
+  let requestId: string;
+  try {
+    ({ requestId } = JSON.parse(data));
+  } catch {
+    return;
+  }
+  void (async () => {
+    const image = (await getSlideCapturer()?.()) ?? null;
+    await fetch("/api/render-result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId, image }),
+    }).catch(() => {});
+  })();
 }
 
 // Maps one SSE event to a ChatEvent. `delta` carries a JSON-encoded text chunk,

@@ -13,11 +13,20 @@ This deck is rendered from `deck.json` + `theme.json` by a shared layout engine
 (inches, fixed 16:9 canvas = 13.333 x 7.5 in). You never touch the DOM or CSS; you
 fix layout by editing the model.
 
-## 1. Gather evidence (don't guess)
+Work in three phases: **scan** (content + geometry + a rendered image), **review**
+(find issues against the checklist), **fix** (minimal edit, then re-render to
+verify). Loop until a clean pass.
+
+## 1. Scan (gather evidence - don't guess)
+
+Get both the data AND a picture of the slide:
 
 - `mcp__deck__get_active_slide` - the slide's JSON **and** its resolved elements
   with positions/sizes in inches, **and** the measured render issues (text
   overflowing, elements off-canvas) the browser reported.
+- `mcp__deck__render_slide` - **renders the slide the user is viewing to an image
+  and shows it to you.** Always do this: look at the actual pixels, do not reason
+  from JSON alone. It is the same fonts/layout the user sees.
 - `mcp__deck__get_design_system` - margins, type sizes, colors, layout spacing
   (the `theme.json` tokens) and the canvas size.
 - `mcp__deck__get_selection` - if the user selected an element or attached a visual
@@ -27,15 +36,20 @@ fix layout by editing the model.
 **The reported render flags are hints, not ground truth — never stop at them.**
 They can be masked: e.g. a geometry `override` that enlarges a text element's box
 means its text no longer exceeds *its own* box, so a naive check sees no overflow,
-yet the text still spills past the card/container it visually sits in. Always do
-your own geometric pass (step 2) over the resolved boxes, and trust the rendered
-image / visible result over any flag. If a slide looks wrong but nothing is
-flagged, believe your eyes and the geometry.
+yet the text still spills past the card/container it visually sits in. Do your own
+geometric pass (step 2) over the resolved boxes AND read the rendered image, and
+trust the pixels over any flag. If a slide looks wrong but nothing is flagged,
+believe your eyes and the geometry.
 
-## 2. Checklist (find issues)
+## 2. Review (find issues)
 
-Walk every element of the active slide against this list. List what you find before
-fixing anything.
+Walk every element of the active slide against this list, cross-checking the
+rendered image against the geometry. List what you find before fixing anything.
+
+**Inspect the rendered image** for things geometry can't show: text visibly cut off
+or overlapping, elements colliding, low-contrast text, uneven/cramped spacing,
+misalignment, a title that doesn't read as the title. Then confirm each against the
+boxes below.
 
 - **Overflow**: an element's rendered height exceeds its box (the render facts flag
   this). Text spilling past a card / off the slide.
@@ -88,6 +102,8 @@ Keep edits minimal and targeted; change the one thing, leave the rest.
 ## 5. Re-verify (loop)
 
 After an edit the preview hot-reloads and the render facts update. **Re-check the
-slide** with `get_active_slide` - one fix often exposes or causes another (trimming
-text shifts everything below it). Repeat find -> fix -> re-verify until a full pass
-turns up nothing new. Do not declare done after a single fix without re-checking.
+slide** with `get_active_slide` AND **`render_slide` again to SEE the result** - one
+fix often exposes or causes another (trimming text shifts everything below it), and
+the image is the only way to confirm the visual problem is actually gone. Repeat
+scan -> review -> fix until a full pass (clean image + clean geometry) turns up
+nothing new. Do not declare done after a single fix without re-rendering.

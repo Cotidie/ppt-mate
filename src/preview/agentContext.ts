@@ -83,6 +83,19 @@ export function getPendingVisual(): { dataUrl: string; rect: Rect } | null {
   return pendingVisual;
 }
 
+// On-demand full-slide capture, registered by the active SlideCanvas. The server
+// calls it (via a `render-request` SSE event mid-turn) so the agent can render and
+// SEE the slide it is viewing. Returns a PNG dataURL, or null if nothing is
+// mounted to capture. Client-only, like pendingVisual.
+let slideCapturer: (() => Promise<string | null>) | null = null;
+
+export function setSlideCapturer(fn: (() => Promise<string | null>) | null): void {
+  slideCapturer = fn;
+}
+export function getSlideCapturer(): (() => Promise<string | null>) | null {
+  return slideCapturer;
+}
+
 function flush(): void {
   const body = pending;
   pending = {};
