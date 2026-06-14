@@ -992,6 +992,32 @@ body.gesture-active * {
   border-top: 1px solid #2a2f3a;
 }
 
+/* Execution-mode selector: a compact chip-style <select> at the left of the input
+   row. Sits flush with the input/Send bottom so a multi-line textarea grows up. */
+.chat-mode {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  max-width: 130px;
+  padding: 8px 8px;
+  border: 1px solid #353b48;
+  border-radius: 8px;
+  background: #262b35;
+  color: #c6ccd8;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.chat-mode:focus {
+  border-color: #3b6fd4;
+}
+
+.chat-mode:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .chat-input {
   flex: 1 1 auto;
   min-width: 0;

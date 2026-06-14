@@ -3,6 +3,7 @@ import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } 
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 import { AgentContextBar } from "./AgentContextBar";
 import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
+import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -39,6 +40,7 @@ export function ChatDock() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [mode, setMode] = useState<string>(DEFAULT_MODE);
   const [account, setAccount] = useState<Account | null>(null);
   const [stats, setStats] = useState<Stats>({});
   const [usage, setUsage] = useState<ApiUsage | null>(null);
@@ -74,7 +76,7 @@ export function ChatDock() {
     setMessages((m) => [...m, { role: "user", text: message }, { role: "assistant", text: "" }]);
     setStreaming(true);
     try {
-      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl);
+      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl, mode);
       if (visual) clearPendingVisual();
     } catch (err) {
       applyEvent({ kind: "error", text: String(err) });
@@ -162,6 +164,20 @@ export function ChatDock() {
       </div>
       <AgentContextBar />
       <div className="chat-input-row">
+        <select
+          className="chat-mode"
+          value={mode}
+          disabled={streaming}
+          onChange={(e) => setMode(e.target.value)}
+          title="Execution mode: an explicit hint sent with your message"
+          aria-label="Execution mode"
+        >
+          {EXEC_MODES.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
         <textarea
           className="chat-input"
           placeholder="Ask Claude Code to edit slides, or anything…"
@@ -357,12 +373,13 @@ async function streamReply(
   message: string,
   onEvent: (ev: ChatEvent) => void,
   signal: AbortSignal,
-  image?: string
+  image?: string,
+  mode?: string
 ): Promise<void> {
   await fetchEventSource("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(image ? { message, image } : { message }),
+    body: JSON.stringify({ message, ...(image ? { image } : {}), ...(mode ? { mode } : {}) }),
     signal,
     openWhenHidden: true, // local dev tool: don't drop the turn on a hidden tab
     async onopen(res) {

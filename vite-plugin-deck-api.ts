@@ -121,9 +121,9 @@ async function handleRenameSlide(req: IncomingMessage, res: ServerResponse, next
 async function handleChat(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
-    const { message, image } = await readJsonBody(req);
+    const { message, image, mode } = await readJsonBody(req);
     openEventStream(res);
-    await claude.runTurn(await composeTurn(message, image), res);
+    await claude.runTurn(await composeTurn(message, image, mode), res);
     sendEvent(res, "done", "");
     res.end();
   } catch (err) {
@@ -168,14 +168,26 @@ async function handleRenderResult(req: IncomingMessage, res: ServerResponse, nex
 // MessageParam content). Loosely typed; the SDK message is a MessageParam.
 type TurnContent = string | Array<Record<string, unknown>>;
 
-// Prepend a compact context header to the user's turn so the agent always has
-// minimal awareness (active slide, selection, any render issues) without having
-// to call a tool. Full detail still comes from the `deck` MCP tools. When the
-// Visual Selection tool attached a crop, ride it along as an image block so the
-// agent sees the selected region pixel-by-pixel beside the text.
-async function composeTurn(message: string, image?: string): Promise<TurnContent> {
+// Explicit execution-mode hints, keyed by the same ids the client's EXEC_MODES
+// uses (src/preview/execModes.ts). A picked mode prepends a directive to the turn
+// so the user can invoke a flow explicitly instead of relying on inference. The
+// "default" mode has no entry (no hint). Add a mode = add one entry here + there.
+const EXEC_HINTS: Record<string, string> = {
+  "fix-layout":
+    "[execution mode: Fix Layout] Use the fix-layout skill on the active slide: " +
+    "render and scan it (render_slide + geometry), find layout/formatting issues, " +
+    "and fix them by editing deck.json / theme.json. Then re-render to verify.",
+};
+
+// Prepend a compact context header (and, if a mode is selected, its execution
+// hint) to the user's turn so the agent always has minimal awareness (active
+// slide, selection, any render issues) without having to call a tool. Full detail
+// still comes from the `deck` MCP tools. When the Visual Selection tool attached a
+// crop, ride it along as an image block so the agent sees the region beside the text.
+async function composeTurn(message: string, image?: string, mode?: string): Promise<TurnContent> {
   const header = await contextHeader();
-  const text = header ? `${header}\n\n${message}` : message;
+  const hint = mode ? EXEC_HINTS[mode] ?? "" : "";
+  const text = [header, hint, message].filter(Boolean).join("\n\n");
   if (!image) return text;
   const data = image.replace(/^data:image\/\w+;base64,/, "");
   return [
