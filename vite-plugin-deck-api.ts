@@ -7,7 +7,7 @@ import type { Plugin, Connect } from "vite";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
-import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, stat, mkdir, rename as renameFs } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { query, createSdkMcpServer, tool, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -79,6 +79,8 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/context", handleContext);
       server.middlewares.use("/api/render-result", handleRenderResult);
       server.middlewares.use("/api/workspace/open", handleWorkspaceOpen);
+      server.middlewares.use("/api/workspace/mkdir", handleWorkspaceMkdir);
+      server.middlewares.use("/api/workspace/rename", handleWorkspaceRename);
       server.middlewares.use("/api/workspace", handleWorkspace);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
@@ -322,6 +324,76 @@ async function handleWorkspaceOpen(req: IncomingMessage, res: ServerResponse, ne
     }
     if (info.isDirectory()) return sendJson(res, 400, { error: "Cannot open a directory." });
     await open(abs); // launches the OS default app; we don't wait on the child
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// A single path segment is valid as a workspace file/folder name when it is
+// non-empty, not "."/".." and carries no separator or NUL. Returns the trimmed
+// name, or null if invalid.
+function validWorkspaceName(raw: unknown): string | null {
+  const name = String(raw ?? "").trim();
+  if (!name || name === "." || name === "..") return null;
+  if (name.includes("/") || name.includes("\\") || name.includes("\0")) return null;
+  return name;
+}
+
+// POST /api/workspace/mkdir { parent, name } -> create a folder inside files/.
+// `parent` is "" for the workspace root. Non-recursive so a duplicate surfaces.
+async function handleWorkspaceMkdir(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { parent, name } = await readJsonBody(req);
+    const clean = validWorkspaceName(name);
+    if (!clean) return sendJson(res, 400, { error: "Invalid folder name." });
+    const parentAbs = resolveWorkspacePath(String(parent ?? ""));
+    if (!parentAbs) return sendJson(res, 400, { error: "Parent is outside the workspace." });
+    const target = resolveWorkspacePath(`${parent ? `${parent}/` : ""}${clean}`);
+    if (!target) return sendJson(res, 400, { error: "Path is outside the workspace." });
+    try {
+      await mkdir(target); // no recursive: EEXIST means it already exists
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+        return sendJson(res, 409, { error: `"${clean}" already exists.` });
+      }
+      throw e;
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// POST /api/workspace/rename { path, name } -> rename a file/folder in place
+// (same parent directory), to a new single-segment name. Sandboxed to files/.
+async function handleWorkspaceRename(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { path, name } = await readJsonBody(req);
+    const clean = validWorkspaceName(name);
+    if (!clean) return sendJson(res, 400, { error: "Invalid name." });
+    const abs = resolveWorkspacePath(String(path ?? ""));
+    if (!abs || abs === WORKSPACE_DIR) return sendJson(res, 400, { error: "Cannot rename this item." });
+    try {
+      await stat(abs);
+    } catch {
+      return sendJson(res, 404, { error: `No such item: ${path}` });
+    }
+    const slash = String(path).lastIndexOf("/");
+    const dir = slash >= 0 ? String(path).slice(0, slash) : "";
+    const target = resolveWorkspacePath(`${dir ? `${dir}/` : ""}${clean}`);
+    if (!target) return sendJson(res, 400, { error: "Path is outside the workspace." });
+    if (target !== abs) {
+      try {
+        await stat(target);
+        return sendJson(res, 409, { error: `"${clean}" already exists.` });
+      } catch {
+        /* target free: proceed */
+      }
+    }
+    await renameFs(abs, target);
     sendJson(res, 200, { ok: true });
   } catch (err) {
     sendJson(res, 500, { error: String(err) });
