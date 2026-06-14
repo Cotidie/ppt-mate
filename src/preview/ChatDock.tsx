@@ -139,7 +139,7 @@ export function ChatDock() {
       <div className="chat-log" ref={logRef}>
         {messages.map((m, i) => (
           <div key={i} className={"chat-msg chat-" + m.role}>
-            {m.text || (streaming && i === messages.length - 1 ? "…" : "")}
+            {m.text || (streaming && i === messages.length - 1 ? <TypingDots /> : "")}
           </div>
         ))}
       </div>
@@ -182,6 +182,18 @@ export function ChatDock() {
         </div>
       )}
     </div>
+  );
+}
+
+// Animated "Claude is thinking" indicator: three bouncing dots, shown in the
+// in-flight assistant bubble until the first text delta arrives.
+function TypingDots() {
+  return (
+    <span className="typing" role="status" aria-label="Claude is thinking">
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+    </span>
   );
 }
 
