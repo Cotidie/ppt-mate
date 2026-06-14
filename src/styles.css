@@ -432,11 +432,8 @@ body.gesture-active * {
 
 .files-icon {
   flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-  margin-left: 2px;
-  border-radius: 2px;
-  background: #3a4252;
+  margin-left: 1px;
+  color: #7d8696;
 }
 
 .files-name {

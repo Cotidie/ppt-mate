@@ -166,10 +166,9 @@ export function FileExplorer() {
               const p = pathOf(element);
               if (p != null) setExpanded(p, isExpanded);
             }}
-            nodeRenderer={({ element, isBranch, isExpanded, getNodeProps, level }) => (
+            nodeRenderer={({ element, isExpanded, getNodeProps, level }) => (
               <FileRow
                 element={element}
-                isBranch={isBranch}
                 isExpanded={isExpanded}
                 level={level}
                 getNodeProps={getNodeProps}
@@ -189,7 +188,6 @@ export function FileExplorer() {
 
 function FileRow({
   element,
-  isBranch,
   isExpanded,
   level,
   getNodeProps,
@@ -200,7 +198,6 @@ function FileRow({
   onCancelRename,
 }: {
   element: INode;
-  isBranch: boolean;
   isExpanded: boolean;
   level: number;
   getNodeProps: () => React.HTMLAttributes<HTMLDivElement>;
@@ -212,17 +209,18 @@ function FileRow({
 }) {
   const meta = element.metadata as Meta | undefined;
   const path = meta?.path ?? "";
+  const isDir = meta?.type === "dir";
   const baseTitle = meta ? path + (meta.size != null ? ` · ${prettyBytes(meta.size)}` : "") : element.name;
-  const title = isBranch ? baseTitle : `${baseTitle} — double-click to open`;
+  const title = isDir ? baseTitle : `${baseTitle} — double-click to open`;
   return (
     <div
       {...getNodeProps()}
-      className={"files-row " + (isBranch ? "files-dir" : "files-file")}
+      className={"files-row " + (isDir ? "files-dir" : "files-file")}
       style={{ paddingLeft: 8 + (level - 1) * 12 }}
       title={editing ? undefined : title}
       data-path={path}
       onDoubleClick={() => {
-        if (!editing && !isBranch && path) onOpen(path);
+        if (!editing && !isDir && path) onOpen(path);
       }}
       // F2 renames the focused row (VS Code convention) for keyboard users.
       onKeyDown={(e) => {
@@ -233,10 +231,13 @@ function FileRow({
         }
       }}
     >
-      {isBranch ? (
-        <span className={"files-caret" + (isExpanded ? " open" : "")}>›</span>
+      {/* Folder vs file by the authoritative type, not isBranch (which is false for
+          an EMPTY folder, making it look like a file). Folders get a foldable
+          caret; files get a document icon. */}
+      {meta?.type === "dir" ? (
+        <span className={"files-caret" + (isExpanded ? " open" : "")} aria-hidden="true">›</span>
       ) : (
-        <span className="files-icon" aria-hidden="true" />
+        <FileIcon />
       )}
       {editing ? (
         <NameInput
@@ -321,6 +322,20 @@ function NameInput({
       onKeyDown={onKeyDown}
       onBlur={() => finish(true)}
     />
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg className="files-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M4 1.5h5L13 5.5v8.5a1 1 0 01-1 1H4a1 1 0 01-1-1v-11a1 1 0 011-1z"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+      <path d="M9 1.5V5a.5.5 0 00.5.5H13" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+    </svg>
   );
 }
 
