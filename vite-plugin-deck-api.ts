@@ -8,16 +8,47 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, createSdkMcpServer, tool, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
+const THEME_PATH = resolve(HERE, "theme.json");
 const OUT_DIR = resolve(HERE, "out");
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
 const CREDS_PATH = resolve(homedir(), ".claude/.credentials.json");
+// User-scope memory to keep OUT of the deck agent. settingSources:["project"]
+// gates *whether* CLAUDE.md loads, but once on it loads the whole memory
+// hierarchy (user + project); this excludes the global file by path so only the
+// project's CLAUDE.md reaches the agent.
+const USER_CLAUDE_MD = resolve(homedir(), ".claude/CLAUDE.md");
+
+// The slide-authoring brief, appended to the agent's system prompt to specialize
+// it (read once at startup; editable like design/DESIGN.md). Missing file -> "".
+const AGENT_BRIEF = ((): string => {
+  try {
+    return readFileSync(resolve(HERE, "agent/SLIDE_AGENT.md"), "utf8");
+  } catch {
+    return "";
+  }
+})();
+
+// Live UI context, kept fresh by the browser via POST /api/context. The agent
+// sees it two ways: a compact header injected into each turn, and the `deck` MCP
+// tools that read it on demand. Fields are additive (future: selectedText,
+// region, pointer) so awareness can grow without re-architecture.
+type RenderFact = { overflowLines?: number; overflowInches?: number; offCanvas?: boolean };
+type TextSel = { elementKey: string; path?: string; text: string; start?: number; end?: number };
+type UiContext = {
+  activeSlideId?: string;
+  selection?: string[];
+  selectedText?: TextSel | null;
+  render?: Record<string, RenderFact>;
+};
+let uiContext: UiContext = {};
 
 // Captured so the export route can load the TypeScript exporter through Vite's
 // transform pipeline (ssrLoadModule) - plain Node can't import the .mts/.ts directly.
@@ -35,6 +66,8 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/slides/move", handleMoveSlide);
       server.middlewares.use("/api/slides/reset-offsets", handleResetOffsets);
       server.middlewares.use("/api/footer", handleEditFooter);
+      server.middlewares.use("/api/context", handleContext);
+      server.middlewares.use("/api/render-result", handleRenderResult);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
       server.middlewares.use("/api/usage", handleUsage);
@@ -88,15 +121,132 @@ async function handleRenameSlide(req: IncomingMessage, res: ServerResponse, next
 async function handleChat(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
-    const { message } = await readJsonBody(req);
+    const { message, image, mode } = await readJsonBody(req);
     openEventStream(res);
-    await claude.runTurn(message, res);
+    // A turn needs content. Typed prose counts; so does a non-default execution
+    // mode (e.g. Fix Layout), whose prepended hint IS the instruction and which
+    // the agent runs against the active slide. Reject only when neither is present.
+    const blank = typeof message !== "string" || !message.trim();
+    if (blank && !(typeof mode === "string" && EXEC_HINTS[mode])) {
+      sendEvent(res, "error", JSON.stringify("Type a message or pick an execution mode."));
+      sendEvent(res, "done", "");
+      res.end();
+      return;
+    }
+    await claude.runTurn(await composeTurn(typeof message === "string" ? message : "", image, mode), res);
     sendEvent(res, "done", "");
     res.end();
   } catch (err) {
     sendEvent(res, "error", String(err));
     res.end();
   }
+}
+
+// The browser pushes live UI state here (active slide, selection, render facts).
+// Partial merge: each call updates only the fields it carries.
+async function handleContext(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const body = await readJsonBody(req);
+    Object.assign(uiContext, body);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// The browser answers a `render-request` here with the captured slide PNG,
+// resolving the render_slide tool's parked promise. Fire-and-forget from the
+// client; a late/unknown id is ignored (already timed out).
+async function handleRenderResult(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { requestId, image } = await readJsonBody(req);
+    const pending = pendingRenders.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingRenders.delete(requestId);
+      pending.resolve(typeof image === "string" && image ? image : null);
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// Content of one user turn: plain text, or text + image blocks (Anthropic
+// MessageParam content). Loosely typed; the SDK message is a MessageParam.
+type TurnContent = string | Array<Record<string, unknown>>;
+
+// Explicit execution-mode hints, keyed by the same ids the client's EXEC_MODES
+// uses (src/preview/execModes.ts). A picked mode prepends a directive to the turn
+// so the user can invoke a flow explicitly instead of relying on inference. The
+// "default" mode has no entry (no hint). Add a mode = add one entry here + there.
+const EXEC_HINTS: Record<string, string> = {
+  "fix-layout":
+    "[execution mode: Fix Layout] Use the fix-layout skill on the active slide: " +
+    "render and scan it (render_slide + geometry), find layout/formatting issues, " +
+    "and fix them by editing deck.json / theme.json. Then re-render to verify.",
+};
+
+// Prepend a compact context header (and, if a mode is selected, its execution
+// hint) to the user's turn so the agent always has minimal awareness (active
+// slide, selection, any render issues) without having to call a tool. Full detail
+// still comes from the `deck` MCP tools. When the Visual Selection tool attached a
+// crop, ride it along as an image block so the agent sees the region beside the text.
+async function composeTurn(message: string, image?: string, mode?: string): Promise<TurnContent> {
+  const header = await contextHeader();
+  const hint = mode ? EXEC_HINTS[mode] ?? "" : "";
+  const text = [header, hint, message].filter(Boolean).join("\n\n");
+  if (!image) return text;
+  const data = image.replace(/^data:image\/\w+;base64,/, "");
+  return [
+    { type: "text", text: `${text}\n\n(Attached: a visual crop of the slide region the user selected; inspect it.)` },
+    { type: "image", source: { type: "base64", media_type: "image/png", data } },
+  ];
+}
+
+async function contextHeader(): Promise<string> {
+  const id = uiContext.activeSlideId;
+  if (!id) return "";
+  let layout = "";
+  let title = "";
+  try {
+    const deck = JSON.parse(await readFile(DECK_PATH, "utf8"));
+    const slide = deck.slides.find((s: { id: string }) => s.id === id);
+    if (slide) {
+      layout = slide.layout ?? "";
+      title = Array.isArray(slide.title) ? slide.title.map((s: { text: string }) => s.text).join("") : "";
+    }
+  } catch {
+    /* deck unreadable: still report the id we have */
+  }
+  const sel = uiContext.selection?.length ? uiContext.selection.join(", ") : "none";
+  const parts = [
+    `active slide: ${id}${layout ? ` (${layout})` : ""}${title ? ` "${title}"` : ""}`,
+    `selection: ${sel}`,
+  ];
+  const st = uiContext.selectedText;
+  if (st?.text) {
+    const snippet = st.text.length > 80 ? st.text.slice(0, 80) + "…" : st.text;
+    parts.push(`text: "${snippet}" in ${st.elementKey}${st.path ? ` (${st.path})` : ""}`);
+  }
+  const issues = renderIssues();
+  if (issues) parts.push(issues);
+  return `[context] ${parts.join("; ")}`;
+}
+
+// Terse one-liner of rendered-layout problems the browser measured, or "" if none.
+function renderIssues(): string {
+  const r = uiContext.render;
+  if (!r) return "";
+  const msgs: string[] = [];
+  for (const [key, f] of Object.entries(r)) {
+    if (f.overflowLines) msgs.push(`${key} overflows ~${f.overflowLines} line(s)`);
+    else if (f.overflowInches) msgs.push(`${key} overflows ~${f.overflowInches}in`);
+    if (f.offCanvas) msgs.push(`${key} off-canvas`);
+  }
+  return msgs.length ? `issues: ${msgs.join(", ")}` : "";
 }
 
 // Ends the current conversation: kills the child so the next turn starts fresh.
@@ -189,6 +339,120 @@ async function readUsage(): Promise<unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// In-process MCP server: gives the agent on-demand read access to the LIVE
+// editor (active slide + resolved geometry, selection, design tokens). Geometry
+// is computed by the same resolveSlide engine the preview and exporter use,
+// loaded through Vite's transform pipeline (like the export route).
+// ---------------------------------------------------------------------------
+
+type ToolText = { content: { type: "text"; text: string }[] };
+const textResult = (obj: unknown): ToolText => ({
+  content: [{ type: "text", text: JSON.stringify(obj, null, 2) }],
+});
+
+// An image tool result the model can view. `dataUrl` is a PNG data URL from the
+// client capture; strip the prefix to the bare base64 the MCP image block wants.
+type ToolImage = { content: { type: "image"; data: string; mimeType: string }[] };
+const imageResult = (dataUrl: string): ToolImage => ({
+  content: [{ type: "image", data: dataUrl.replace(/^data:image\/\w+;base64,/, ""), mimeType: "image/png" }],
+});
+
+// Resolve a slide to positioned Elements (inches) via the shared layout engine.
+async function resolveElements(slide: unknown, footer: string): Promise<unknown[]> {
+  if (!devServer) return [];
+  const mod = (await devServer.ssrLoadModule("/src/layout/resolve.ts")) as {
+    resolveSlide: (s: unknown, t: unknown, f: string) => unknown[];
+  };
+  const theme = JSON.parse(await readFile(THEME_PATH, "utf8"));
+  return mod.resolveSlide(slide, theme, footer);
+}
+
+async function loadDeck(): Promise<any> {
+  return JSON.parse(await readFile(DECK_PATH, "utf8"));
+}
+
+function activeSlide(deck: any): any {
+  return deck.slides.find((s: { id: string }) => s.id === uiContext.activeSlideId);
+}
+
+const deckMcp = createSdkMcpServer({
+  name: "deck",
+  version: "1.0.0",
+  instructions:
+    "Inspect the live slide editor: the active slide with resolved geometry, the " +
+    "current selection, and the design system. Use render_slide to actually SEE the " +
+    "slide as a rendered image. Read-only; edit deck.json to change slides.",
+  tools: [
+    tool(
+      "get_active_slide",
+      "The slide the user is currently viewing: its full JSON plus resolved elements (positions/sizes in inches) and any measured render issues (overflow / off-canvas).",
+      {},
+      async () => {
+        const deck = await loadDeck();
+        const slide = activeSlide(deck) ?? deck.slides[0];
+        if (!slide) return textResult({ error: "deck has no slides" });
+        const elements = await resolveElements(slide, deck.meta?.footer ?? "");
+        return textResult({
+          activeSlideId: slide.id,
+          layout: slide.layout,
+          slide,
+          elements,
+          render: uiContext.render ?? {},
+        });
+      },
+    ),
+    tool(
+      "get_selection",
+      "What the user has selected for context with the Selection tool: the element(s) (each with resolved geometry + any render issue) and, when present, the exact selected text range (substring, the element + deck field it is in, and char offsets). Empty when nothing is selected.",
+      {},
+      async () => {
+        const keys = uiContext.selection ?? [];
+        const deck = await loadDeck();
+        const slide = activeSlide(deck);
+        const elements = slide ? await resolveElements(slide, deck.meta?.footer ?? "") : [];
+        const items = keys.map((key) => ({
+          key,
+          element: (elements as { key?: string }[]).find((e) => e.key === key) ?? null,
+          render: uiContext.render?.[key] ?? null,
+        }));
+        return textResult({
+          activeSlideId: uiContext.activeSlideId,
+          selection: keys,
+          selectedText: uiContext.selectedText ?? null,
+          items,
+        });
+      },
+    ),
+    tool(
+      "get_design_system",
+      "The current visual design tokens (theme.json: colors, fonts, type sizes, margins, layout spacing). The full spec prose lives in design/DESIGN.md.",
+      {},
+      async () => {
+        const theme = JSON.parse(await readFile(THEME_PATH, "utf8"));
+        return textResult({ theme, spec: "design/DESIGN.md" });
+      },
+    ),
+    tool(
+      "render_slide",
+      "Render the slide the user is currently viewing to an image and look at it. Returns a pixel-faithful PNG of the live preview (the same fonts/layout the user sees). Use this to judge visual problems geometry alone can't show: overlaps, cut-off text, low contrast, uneven spacing, misalignment. Re-call after an edit to verify the fix.",
+      {},
+      async () => {
+        const dataUrl = await claude.requestClientRender();
+        if (!dataUrl) {
+          return textResult({ error: "Couldn't capture the slide - is the preview open in the browser?" });
+        }
+        return imageResult(dataUrl);
+      },
+    ),
+  ],
+});
+
+// Pending render requests keyed by id: the render_slide tool parks a promise here
+// and the browser resolves it via POST /api/render-result with the captured PNG.
+const pendingRenders = new Map<string, { resolve: (v: string | null) => void; timer: ReturnType<typeof setTimeout> }>();
+const RENDER_TIMEOUT_MS = 8000;
+
 // A single persistent Claude Agent SDK session per dev server, driven in
 // streaming-input mode: one long-lived `query` whose prompt is a pushable stream,
 // so every chat turn feeds the same conversation. Turns are serialized (one
@@ -202,8 +466,8 @@ class ClaudeSession {
   private activeRes?: ServerResponse;
   private endTurn?: () => void;
 
-  runTurn(message: string, res: ServerResponse): Promise<void> {
-    const turn = this.queue.then(() => this.execTurn(message, res));
+  runTurn(content: TurnContent, res: ServerResponse): Promise<void> {
+    const turn = this.queue.then(() => this.execTurn(content, res));
     this.queue = turn.catch(() => {}); // a failed turn must not wedge the queue
     return turn;
   }
@@ -219,7 +483,7 @@ class ClaudeSession {
     this.reset();
   }
 
-  private execTurn(message: string, res: ServerResponse): Promise<void> {
+  private execTurn(content: TurnContent, res: ServerResponse): Promise<void> {
     this.ensureStarted();
     return new Promise<void>((resolve) => {
       this.activeRes = res;
@@ -228,7 +492,7 @@ class ClaudeSession {
         this.endTurn = undefined;
         resolve();
       };
-      this.input!.push(message);
+      this.input!.push(content);
     });
   }
 
@@ -242,6 +506,22 @@ class ClaudeSession {
         model: CLAUDE_MODEL,
         permissionMode: "bypassPermissions",
         includePartialMessages: true,
+        // Specialize the agent: Claude Code base (keeps file-edit skill + auto-loads
+        // project CLAUDE.md) reframed for slide authoring by the appended brief.
+        systemPrompt: { type: "preset", preset: "claude_code", append: AGENT_BRIEF },
+        // Isolation: load only project settings + CLAUDE.md (not user/local
+        // settings.json). 'project' is required for any CLAUDE.md to load at all.
+        settingSources: ["project"],
+        // ...but enabling CLAUDE.md loads the full user+project memory hierarchy,
+        // so drop the user-global file by path. Keeps the project CLAUDE.md.
+        settings: { claudeMdExcludes: [USER_CLAUDE_MD] },
+        // Use only our in-process tools; ignore any stray .mcp.json / user MCP.
+        strictMcpConfig: true,
+        disallowedTools: ["WebFetch", "WebSearch"],
+        mcpServers: { deck: deckMcp },
+        // Repo-bundled skills under .claude/skills/. Explicit list (not 'all') so
+        // only project skills load - a user-scope skill can't leak in.
+        skills: ["fix-layout"],
       },
     });
     this.input = input;
@@ -288,6 +568,23 @@ class ClaudeSession {
     this.failTurn("Claude session ended.");
   }
 
+  // Ask the browser to rasterize the slide it is showing and send the PNG back.
+  // Emits a `render-request` SSE event on the active turn's stream; the client
+  // POSTs to /api/render-result, which resolves the parked promise. Resolves null
+  // if no turn is live or the client doesn't answer within the timeout.
+  requestClientRender(): Promise<string | null> {
+    if (!this.activeRes) return Promise.resolve(null);
+    const requestId = `r${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => {
+        pendingRenders.delete(requestId);
+        resolve(null);
+      }, RENDER_TIMEOUT_MS);
+      pendingRenders.set(requestId, { resolve, timer });
+      this.send("render-request", JSON.stringify({ requestId }));
+    });
+  }
+
   private failTurn(reason: string): void {
     if (!this.endTurn) return;
     this.send("error", JSON.stringify(reason));
@@ -306,7 +603,7 @@ const claude = new ClaudeSession();
 // we `push` a user turn into it on demand and `close` it on reset.
 type PushableInput = {
   stream: AsyncGenerator<SDKUserMessage>;
-  push: (text: string) => void;
+  push: (content: TurnContent) => void;
   close: () => void;
 };
 
@@ -330,10 +627,10 @@ function createInputStream(): PushableInput {
 
   return {
     stream,
-    push(text) {
+    push(content) {
       const msg = {
         type: "user",
-        message: { role: "user", content: text },
+        message: { role: "user", content },
         parent_tool_use_id: null,
       } as SDKUserMessage;
       if (waiting) {

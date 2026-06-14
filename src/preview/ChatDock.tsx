@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
+import { AgentContextBar } from "./AgentContextBar";
+import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
+import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
+import { ModeSelect } from "./ModeSelect";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -37,7 +41,7 @@ export function ChatDock() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [mode, setMode] = useState<string>(DEFAULT_MODE);
   const [account, setAccount] = useState<Account | null>(null);
   const [stats, setStats] = useState<Stats>({});
   const [usage, setUsage] = useState<ApiUsage | null>(null);
@@ -64,14 +68,25 @@ export function ChatDock() {
       .catch(() => {});
   };
 
+  // A non-default execution mode is itself the instruction (it prepends a hint and
+  // the agent already has the slide context), so an empty message is allowed then.
+  // Default mode still needs typed content.
+  const canSend = !streaming && (input.trim().length > 0 || mode !== DEFAULT_MODE);
+
   const send = async () => {
+    if (!canSend) return;
     const message = input.trim();
-    if (!message || streaming) return;
+    // Attach a pending Visual Selection crop, if any, to this turn (one-shot).
+    const visual = getPendingVisual();
     setInput("");
-    setMessages((m) => [...m, { role: "user", text: message }, { role: "assistant", text: "" }]);
+    // When the user sent no prose, show the chosen mode as the user's request.
+    const modeLabel = EXEC_MODES.find((m) => m.id === mode)?.label ?? mode;
+    const shown = message || `▷ ${modeLabel}`;
+    setMessages((m) => [...m, { role: "user", text: shown }, { role: "assistant", text: "" }]);
     setStreaming(true);
     try {
-      await streamReply(message, applyEvent, new AbortController().signal);
+      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl, mode);
+      if (visual) clearPendingVisual();
     } catch (err) {
       applyEvent({ kind: "error", text: String(err) });
     } finally {
@@ -81,9 +96,9 @@ export function ChatDock() {
   };
 
   // Ends the conversation: tells the server to kill its Claude process and wipes
-  // the local transcript so the next message starts fresh.
-  const newChat = async () => {
-    setMenuOpen(false);
+  // the local transcript so the next message starts fresh. Surfaced as "Clear" by
+  // the context gauge, since it resets that gauge.
+  const clearChat = async () => {
     if (streaming) return;
     await fetch("/api/chat/reset", { method: "POST" }).catch(() => {});
     setMessages([]);
@@ -129,16 +144,36 @@ export function ChatDock() {
       </div>
       {hidden ? null : (
         <div className="chat-body">
-      <AccountPanel account={account} stats={stats} usage={usage} />
+      <AccountPanel
+        account={account}
+        stats={stats}
+        usage={usage}
+        onClear={clearChat}
+        canClear={messages.length > 0 && !streaming}
+      />
       <div className="chat-col">
       <div className="chat-log" ref={logRef}>
-        {messages.map((m, i) => (
-          <div key={i} className={"chat-msg chat-" + m.role}>
-            {m.text || (streaming && i === messages.length - 1 ? "…" : "")}
+        {messages.map((m, i) =>
+          // The in-flight assistant bubble is empty until the first token; don't
+          // render it yet - the thinking row below stands in for it.
+          m.text ? (
+            <div key={i} className={"chat-msg chat-" + m.role}>
+              {m.text}
+            </div>
+          ) : null,
+        )}
+        {/* Multi-step turns stream text, call tools, then stream more. Keep the
+            indicator under the bubble until the turn is truly done (streaming off),
+            not just until the first token. */}
+        {streaming && (
+          <div className="chat-typing-row">
+            <TypingDots />
           </div>
-        ))}
+        )}
       </div>
+      <AgentContextBar />
       <div className="chat-input-row">
+        <ModeSelect mode={mode} onChange={setMode} disabled={streaming} />
         <textarea
           className="chat-input"
           placeholder="Ask Claude Code to edit slides, or anything…"
@@ -149,33 +184,27 @@ export function ChatDock() {
           onKeyDown={onKeyDown}
         />
         <div className="chat-send-group">
-          <button className="chat-send" onClick={send} disabled={streaming || !input.trim()}>
+          <button className="chat-send" onClick={send} disabled={!canSend}>
             {streaming ? "…" : "Send"}
           </button>
-          <button
-            className="chat-send-caret"
-            aria-label="More actions"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((o) => !o)}
-          >
-            ▾
-          </button>
-          {menuOpen && (
-            <>
-              <div className="chat-menu-backdrop" onClick={() => setMenuOpen(false)} />
-              <div className="chat-menu" role="menu">
-                <button role="menuitem" onClick={newChat} disabled={messages.length === 0}>
-                  New chat
-                </button>
-              </div>
-            </>
-          )}
         </div>
       </div>
       </div>
         </div>
       )}
     </div>
+  );
+}
+
+// Animated "Claude is thinking" indicator: three bouncing dots, shown in the
+// in-flight assistant bubble until the first text delta arrives.
+function TypingDots() {
+  return (
+    <span className="typing" role="status" aria-label="Claude is thinking">
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+    </span>
   );
 }
 
@@ -226,14 +255,26 @@ function UsageGauge({ label, pct, detail }: { label: string; pct: number | null;
 // Left-rail panel inside the dock: Claude account, active model, and usage
 // gauges (context window, 5h, 7d). Account comes from /api/account; model and
 // context tokens from chat stream `meta` frames; 5h/7d from /api/usage.
-function AccountPanel({ account, stats, usage }: { account: Account | null; stats: Stats; usage: ApiUsage | null }) {
+function AccountPanel({
+  account,
+  stats,
+  usage,
+  onClear,
+  canClear,
+}: {
+  account: Account | null;
+  stats: Stats;
+  usage: ApiUsage | null;
+  onClear: () => void;
+  canClear: boolean;
+}) {
   const model = stats.model ?? account?.model;
-  const ctxPct = stats.contextUsed != null && stats.contextWindow
-    ? stats.contextUsed / stats.contextWindow * 100
-    : null;
-  const ctxDetail = stats.contextUsed != null && stats.contextWindow
-    ? `${fmtTok(stats.contextUsed)}/${fmtTok(stats.contextWindow)}`
-    : "—";
+  // Before the first turn there is genuinely no context used, so show a real 0%
+  // gauge (a "—" reads as an error). Default the window to the server's 1.0M.
+  const ctxUsed = stats.contextUsed ?? 0;
+  const ctxWindow = stats.contextWindow ?? 1_000_000;
+  const ctxPct = ctxUsed / ctxWindow * 100;
+  const ctxDetail = `${fmtTok(ctxUsed)}/${fmtTok(ctxWindow)}`;
   const fh = usage?.fiveHour;
   const sd = usage?.sevenDay;
   return (
@@ -252,7 +293,17 @@ function AccountPanel({ account, stats, usage }: { account: Account | null; stat
         <div className="cp-value" title={model}>{model ?? "…"}</div>
       </div>
       <div className="cp-section">
-        <div className="cp-label">Usage</div>
+        <div className="cp-head">
+          <span className="cp-label">Usage</span>
+          <button
+            className="cp-clear"
+            onClick={onClear}
+            disabled={!canClear}
+            title="Clear the conversation and reset the context window"
+          >
+            Clear
+          </button>
+        </div>
         <UsageGauge label="Ctx" pct={ctxPct} detail={ctxDetail} />
         <UsageGauge
           label="5h"
@@ -317,12 +368,14 @@ type ChatEvent =
 async function streamReply(
   message: string,
   onEvent: (ev: ChatEvent) => void,
-  signal: AbortSignal
+  signal: AbortSignal,
+  image?: string,
+  mode?: string
 ): Promise<void> {
   await fetchEventSource("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, ...(image ? { image } : {}), ...(mode ? { mode } : {}) }),
     signal,
     openWhenHidden: true, // local dev tool: don't drop the turn on a hidden tab
     async onopen(res) {
@@ -330,6 +383,10 @@ async function streamReply(
       throw new Error(`Chat failed (${res.status}). Is the dev server running?`);
     },
     onmessage(ev) {
+      if (ev.event === "render-request") {
+        handleRenderRequest(ev.data);
+        return; // a side effect (capture + POST back), not a chat message
+      }
       const parsed = toEvent(ev.event, ev.data);
       if (parsed) onEvent(parsed);
     },
@@ -341,6 +398,26 @@ async function streamReply(
       throw err; // a real failure: stop, don't auto-retry against a dead server
     },
   });
+}
+
+// The agent's render_slide tool asks (mid-turn) for a render of the active slide.
+// Capture the live stage to a PNG and POST it back so the tool result can resolve.
+// Fire-and-forget: a failure just lets the server's render timeout return null.
+function handleRenderRequest(data: string): void {
+  let requestId: string;
+  try {
+    ({ requestId } = JSON.parse(data));
+  } catch {
+    return;
+  }
+  void (async () => {
+    const image = (await getSlideCapturer()?.()) ?? null;
+    await fetch("/api/render-result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId, image }),
+    }).catch(() => {});
+  })();
 }
 
 // Maps one SSE event to a ChatEvent. `delta` carries a JSON-encoded text chunk,

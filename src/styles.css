@@ -121,6 +121,18 @@ body {
   outline: 2px solid #3b6fd4;
 }
 
+/* Select tool: hovering an element hints it is pickable as Claude context; the
+   picked element gets a distinct solid ring + soft halo (vs the move outline). */
+.el-frame.select:hover:not(.ctx-selected) {
+  outline: 1px dashed rgba(59, 111, 212, 0.55);
+  border-radius: 3px;
+}
+.el-frame.ctx-selected {
+  outline: 2px solid #3b6fd4;
+  border-radius: 3px;
+  box-shadow: 0 0 0 4px rgba(59, 111, 212, 0.18);
+}
+
 /* During a move/resize drag, force one cursor across the whole document so it
    never reverts to the arrow over empty space or a slipped-away edge, and block
    text selection (edit mode leaves text selectable, so the resize drag would
@@ -742,18 +754,18 @@ body.gesture-active * {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 14px 8px;
+  padding: 8px 12px 6px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 
 .chat-msg {
-  max-width: 80%;
-  padding: 8px 10px;
+  max-width: 88%;
+  padding: 5px 9px;
   border-radius: 8px;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -777,11 +789,318 @@ body.gesture-active * {
   border: 1px solid #5a2d33;
 }
 
+/* Thinking indicator row: sits just under the (possibly still-growing) assistant
+   bubble and stays until the whole turn finishes, so multi-step turns that pause
+   to call tools keep showing activity. */
+.chat-typing-row {
+  align-self: flex-start;
+  padding: 2px 9px;
+}
+
+/* Three dots bouncing in sequence. */
+.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #8b93a3;
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot {
+    animation: typing-fade 1.2s ease-in-out infinite;
+  }
+  @keyframes typing-fade {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+}
+
+/* "Claude sees" context strip: a live, clickable summary of the agent's
+   awareness, sitting between the chat log and the input. */
+.ctx-wrap {
+  position: relative;
+}
+.ctx-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid #2a2f3a;
+  color: #8b93a3;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+.ctx-bar:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.ctx-bar.flash {
+  background: rgba(59, 111, 212, 0.14);
+}
+.ctx-eye {
+  display: inline-flex;
+  color: #6b7280;
+  flex: 0 0 auto;
+}
+.ctx-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #6b7280;
+  flex: 0 0 auto;
+}
+.ctx-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #232834;
+  color: #c2c8d2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  font-variant-numeric: tabular-nums;
+}
+.ctx-chip.warn {
+  background: rgba(232, 137, 61, 0.18);
+  color: #e8a86b;
+}
+.ctx-caret {
+  margin-left: auto;
+  color: #6b7280;
+  flex: 0 0 auto;
+}
+/* Detail popover: the literal [context] line stitched into each turn. Opens
+   upward (the strip sits near the bottom of the dock). */
+.ctx-pop {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% + 6px);
+  background: rgba(20, 23, 30, 0.98);
+  border: 1px solid #353b48;
+  border-radius: 10px;
+  padding: 10px 12px;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.ctx-pop-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+.ctx-pop-line {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #e7eaf0;
+}
+.ctx-pop-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  border: 1px solid #353b48;
+  border-radius: 6px;
+}
+
+/* Visual Selection tool: the live drag region over the slide. */
+.visual-rect {
+  position: absolute;
+  border: 1.5px dashed #3b6fd4;
+  background: rgba(59, 111, 212, 0.12);
+  pointer-events: none;
+}
+/* The captured region stays marked until sent or cleared: solid (vs the dashed
+   live drag), with a clear button. The box ignores pointers; the button doesn't. */
+.visual-rect.captured {
+  border-style: solid;
+  background: rgba(59, 111, 212, 0.08);
+}
+.visual-rect-x {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: #3b6fd4;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.visual-rect-x:hover {
+  background: #5384e0;
+}
+
+/* Clear affordance inside the 📷 region chip. */
+.ctx-chip-x {
+  margin-left: 5px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.ctx-chip-x:hover {
+  opacity: 1;
+}
+
 .chat-input-row {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 8px 14px 12px;
   border-top: 1px solid #2a2f3a;
+}
+
+/* Execution-mode selector (Radix DropdownMenu): a pill-style trigger at the left
+   of the input row, opening a popover menu above. Sits flush with the input/Send
+   bottom so a multi-line textarea grows up. */
+.mode-trigger {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 35px;
+  padding: 0 9px;
+  border: 1px solid #353b48;
+  border-radius: 999px;
+  background: #262b35;
+  color: #c6ccd8;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.mode-trigger:hover:not(:disabled),
+.mode-trigger[data-state="open"] {
+  background: #2d3950;
+  border-color: #4a5160;
+  color: #e7eaf0;
+}
+
+.mode-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mode-trigger .mode-icon {
+  color: #6f86c4;
+}
+
+.mode-trigger .mode-caret {
+  color: #8b93a3;
+  transition: transform 0.12s ease;
+}
+
+.mode-trigger[data-state="open"] .mode-caret {
+  transform: rotate(180deg);
+}
+
+.mode-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Popover menu */
+.mode-menu {
+  min-width: 180px;
+  padding: 5px;
+  border: 1px solid #353b48;
+  border-radius: 10px;
+  background: #1c212b;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 300;
+  animation: mode-menu-in 0.12s ease;
+}
+
+@keyframes mode-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.mode-menu-label {
+  padding: 4px 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+}
+
+.mode-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #c6ccd8;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.mode-item[data-highlighted] {
+  background: #2d3950;
+  color: #fff;
+}
+
+.mode-item[data-state="checked"] {
+  color: #e7eaf0;
+}
+
+.mode-item-check {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: #6f86c4;
 }
 
 .chat-input {
@@ -803,32 +1122,22 @@ body.gesture-active * {
   border-color: #3b6fd4;
 }
 
-/* Split button: Send + a caret that opens the actions menu. */
 .chat-send-group {
   flex: 0 0 auto;
-  align-self: flex-end;
-  position: relative;
   display: flex;
 }
 
-.chat-send,
-.chat-send-caret {
+.chat-send {
+  height: 35px;
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: #3b6fd4;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
-}
-
-.chat-send {
-  padding: 8px 16px;
-  border-radius: 8px 0 0 8px;
-}
-
-.chat-send-caret {
-  padding: 8px 8px;
-  border-radius: 0 8px 8px 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 0 16px;
+  border-radius: 8px;
 }
 
 .chat-send:disabled {
@@ -836,46 +1145,30 @@ body.gesture-active * {
   cursor: default;
 }
 
-.chat-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 4;
-}
-
-.chat-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 5;
-  min-width: 100%;
-  padding: 4px;
+/* "Clear" chip in the Usage header: ends the conversation and resets the context
+   gauge it sits beside. Quiet until hovered. */
+.cp-clear {
+  margin-left: auto;
+  padding: 1px 8px;
   border: 1px solid #353b48;
-  border-radius: 8px;
-  background: #262b35;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-.chat-menu button {
-  display: block;
-  width: 100%;
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
+  border-radius: 999px;
   background: transparent;
-  color: #c6ccd8;
-  font-size: 13px;
-  text-align: center;
-  white-space: nowrap;
+  color: #8b93a3;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   cursor: pointer;
 }
 
-.chat-menu button:hover:not(:disabled) {
+.cp-clear:hover:not(:disabled) {
+  border-color: #4a5160;
   background: #2d3950;
-  color: #fff;
+  color: #e7eaf0;
 }
 
-.chat-menu button:disabled {
-  opacity: 0.4;
+.cp-clear:disabled {
+  opacity: 0.35;
   cursor: default;
 }
 
@@ -1047,35 +1340,35 @@ body.gesture-active * {
 }
 .settings-modal-body {
   display: flex;
+  flex-direction: column;
   min-height: 0;
   flex: 1;
 }
 .settings-tabs {
   flex: 0 0 auto;
-  width: 130px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px;
-  border-right: 1px solid #2a2f3a;
+  flex-direction: row;
+  gap: 4px;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid #2a2f3a;
 }
 .settings-tab {
-  text-align: left;
+  position: relative;
   background: transparent;
   border: none;
-  border-radius: 7px;
   color: #9aa3b2;
   font-size: 13px;
   padding: 8px 12px;
   cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
 .settings-tab:hover {
-  background: #2a3550;
   color: #e7eaf0;
 }
 .settings-tab.active {
-  background: #2d3950;
   color: #e7eaf0;
+  border-bottom-color: #3b6fd4;
 }
 .settings-content {
   flex: 1;
