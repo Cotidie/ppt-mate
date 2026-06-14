@@ -1227,35 +1227,35 @@ body.gesture-active * {
 }
 .settings-modal-body {
   display: flex;
+  flex-direction: column;
   min-height: 0;
   flex: 1;
 }
 .settings-tabs {
   flex: 0 0 auto;
-  width: 130px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px;
-  border-right: 1px solid #2a2f3a;
+  flex-direction: row;
+  gap: 4px;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid #2a2f3a;
 }
 .settings-tab {
-  text-align: left;
+  position: relative;
   background: transparent;
   border: none;
-  border-radius: 7px;
   color: #9aa3b2;
   font-size: 13px;
   padding: 8px 12px;
   cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
 .settings-tab:hover {
-  background: #2a3550;
   color: #e7eaf0;
 }
 .settings-tab.active {
-  background: #2d3950;
   color: #e7eaf0;
+  border-bottom-color: #3b6fd4;
 }
 .settings-content {
   flex: 1;
