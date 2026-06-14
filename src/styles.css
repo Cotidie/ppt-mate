@@ -1011,32 +1011,20 @@ body.gesture-active * {
   border-color: #3b6fd4;
 }
 
-/* Split button: Send + a caret that opens the actions menu. */
 .chat-send-group {
   flex: 0 0 auto;
   align-self: flex-end;
-  position: relative;
   display: flex;
 }
 
-.chat-send,
-.chat-send-caret {
+.chat-send {
   border: none;
   background: #3b6fd4;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
-}
-
-.chat-send {
   padding: 8px 16px;
-  border-radius: 8px 0 0 8px;
-}
-
-.chat-send-caret {
-  padding: 8px 8px;
-  border-radius: 0 8px 8px 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
 }
 
 .chat-send:disabled {
@@ -1044,46 +1032,30 @@ body.gesture-active * {
   cursor: default;
 }
 
-.chat-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 4;
-}
-
-.chat-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 5;
-  min-width: 100%;
-  padding: 4px;
+/* "Clear" chip in the Usage header: ends the conversation and resets the context
+   gauge it sits beside. Quiet until hovered. */
+.cp-clear {
+  margin-left: auto;
+  padding: 1px 8px;
   border: 1px solid #353b48;
-  border-radius: 8px;
-  background: #262b35;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-.chat-menu button {
-  display: block;
-  width: 100%;
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
+  border-radius: 999px;
   background: transparent;
-  color: #c6ccd8;
-  font-size: 13px;
-  text-align: center;
-  white-space: nowrap;
+  color: #8b93a3;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   cursor: pointer;
 }
 
-.chat-menu button:hover:not(:disabled) {
+.cp-clear:hover:not(:disabled) {
+  border-color: #4a5160;
   background: #2d3950;
-  color: #fff;
+  color: #e7eaf0;
 }
 
-.chat-menu button:disabled {
-  opacity: 0.4;
+.cp-clear:disabled {
+  opacity: 0.35;
   cursor: default;
 }
 

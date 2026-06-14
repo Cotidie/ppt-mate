@@ -39,7 +39,6 @@ export function ChatDock() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [account, setAccount] = useState<Account | null>(null);
   const [stats, setStats] = useState<Stats>({});
   const [usage, setUsage] = useState<ApiUsage | null>(null);
@@ -86,9 +85,9 @@ export function ChatDock() {
   };
 
   // Ends the conversation: tells the server to kill its Claude process and wipes
-  // the local transcript so the next message starts fresh.
-  const newChat = async () => {
-    setMenuOpen(false);
+  // the local transcript so the next message starts fresh. Surfaced as "Clear" by
+  // the context gauge, since it resets that gauge.
+  const clearChat = async () => {
     if (streaming) return;
     await fetch("/api/chat/reset", { method: "POST" }).catch(() => {});
     setMessages([]);
@@ -134,7 +133,13 @@ export function ChatDock() {
       </div>
       {hidden ? null : (
         <div className="chat-body">
-      <AccountPanel account={account} stats={stats} usage={usage} />
+      <AccountPanel
+        account={account}
+        stats={stats}
+        usage={usage}
+        onClear={clearChat}
+        canClear={messages.length > 0 && !streaming}
+      />
       <div className="chat-col">
       <div className="chat-log" ref={logRef}>
         {messages.map((m, i) =>
@@ -170,24 +175,6 @@ export function ChatDock() {
           <button className="chat-send" onClick={send} disabled={streaming || !input.trim()}>
             {streaming ? "…" : "Send"}
           </button>
-          <button
-            className="chat-send-caret"
-            aria-label="More actions"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((o) => !o)}
-          >
-            ▾
-          </button>
-          {menuOpen && (
-            <>
-              <div className="chat-menu-backdrop" onClick={() => setMenuOpen(false)} />
-              <div className="chat-menu" role="menu">
-                <button role="menuitem" onClick={newChat} disabled={messages.length === 0}>
-                  New chat
-                </button>
-              </div>
-            </>
-          )}
         </div>
       </div>
       </div>
@@ -256,7 +243,19 @@ function UsageGauge({ label, pct, detail }: { label: string; pct: number | null;
 // Left-rail panel inside the dock: Claude account, active model, and usage
 // gauges (context window, 5h, 7d). Account comes from /api/account; model and
 // context tokens from chat stream `meta` frames; 5h/7d from /api/usage.
-function AccountPanel({ account, stats, usage }: { account: Account | null; stats: Stats; usage: ApiUsage | null }) {
+function AccountPanel({
+  account,
+  stats,
+  usage,
+  onClear,
+  canClear,
+}: {
+  account: Account | null;
+  stats: Stats;
+  usage: ApiUsage | null;
+  onClear: () => void;
+  canClear: boolean;
+}) {
   const model = stats.model ?? account?.model;
   const ctxPct = stats.contextUsed != null && stats.contextWindow
     ? stats.contextUsed / stats.contextWindow * 100
@@ -282,7 +281,17 @@ function AccountPanel({ account, stats, usage }: { account: Account | null; stat
         <div className="cp-value" title={model}>{model ?? "…"}</div>
       </div>
       <div className="cp-section">
-        <div className="cp-label">Usage</div>
+        <div className="cp-head">
+          <span className="cp-label">Usage</span>
+          <button
+            className="cp-clear"
+            onClick={onClear}
+            disabled={!canClear}
+            title="Clear the conversation and reset the context window"
+          >
+            Clear
+          </button>
+        </div>
         <UsageGauge label="Ctx" pct={ctxPct} detail={ctxDetail} />
         <UsageGauge
           label="5h"
