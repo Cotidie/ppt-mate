@@ -247,7 +247,9 @@ function FileRow({
         />
       ) : (
         <>
-          {/* Rename pencil: revealed only on row hover (CSS). */}
+          <span className="files-name">{element.name}</span>
+          {/* Rename pencil at the row's far right; revealed on row hover or when
+              the row (treeitem) has keyboard focus (CSS). */}
           <button
             className="files-rename"
             title="Rename"
@@ -260,7 +262,6 @@ function FileRow({
           >
             <PencilIcon />
           </button>
-          <span className="files-name">{element.name}</span>
         </>
       )}
     </div>

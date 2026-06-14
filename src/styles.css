@@ -359,12 +359,6 @@ body.gesture-active * {
   margin: 0;
   padding: 0;
 }
-.files-tree li:focus {
-  outline: none;
-}
-.files-tree li:focus > .files-row {
-  background: #2d3950;
-}
 
 .files-row {
   display: flex;
@@ -388,15 +382,21 @@ body.gesture-active * {
 .files-row:hover {
   background: #262b35;
 }
-/* Selected row (library sets aria-selected on the treeitem). */
-.files-tree li[aria-selected="true"] > .files-row {
+.files-row:focus {
+  outline: none;
+}
+/* Selected/focused row (getNodeProps puts role=treeitem + aria-selected on the
+   .files-row div itself, so target it directly - not a wrapping li). */
+.files-row[aria-selected="true"],
+.files-row:focus {
   background: #2d3950;
 }
 
-/* Rename pencil: left of the name, space reserved so the name doesn't jump;
-   only revealed on row hover. */
+/* Rename pencil: pinned to the row's far right (margin-left:auto), space reserved
+   so the name's width doesn't jump; revealed on row hover or treeitem focus. */
 .files-rename {
   flex: 0 0 auto;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -411,7 +411,8 @@ body.gesture-active * {
   opacity: 0;
   transition: opacity 0.1s ease;
 }
-.files-row:hover .files-rename {
+.files-row:hover .files-rename,
+.files-row:focus .files-rename {
   opacity: 1;
 }
 .files-rename:hover {
@@ -439,6 +440,8 @@ body.gesture-active * {
 }
 
 .files-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
