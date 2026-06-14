@@ -332,12 +332,11 @@ body.gesture-active * {
   cursor: pointer;
 }
 
-/* Shared inline name editor (New Folder + rename). */
-.files-new-row,
+/* Inline name editor (New Folder + rename), rendered inside a tree row. */
 .files-edit {
   width: 100%;
   min-width: 0;
-  padding: 3px 6px;
+  padding: 2px 6px;
   border: 1px solid #3b6fd4;
   border-radius: 5px;
   background: #1c212b;
@@ -345,10 +344,6 @@ body.gesture-active * {
   font: inherit;
   font-size: 12.5px;
   outline: none;
-}
-.files-new-row {
-  margin: 4px 6px 6px;
-  width: calc(100% - 12px);
 }
 
 /* react-accessible-treeview renders ul[role=tree] / li[role=treeitem]; strip the
