@@ -3,7 +3,7 @@ import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } 
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 import { Mention, MentionsInput } from "react-mentions";
 import { AgentContextBar } from "./AgentContextBar";
-import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
+import { getPendingVisual, clearPendingVisual, getSlideCapturer, type VisualRegion } from "./agentContext";
 import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
 import { ModeSelect } from "./ModeSelect";
 import { fetchTree } from "./workspaceApi";
@@ -123,7 +123,7 @@ export function ChatDock() {
     setMessages((m) => [...m, { role: "user", text: shown }, { role: "assistant", text: "" }]);
     setStreaming(true);
     try {
-      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl, mode);
+      await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl, mode, visual?.region);
       if (visual) clearPendingVisual();
     } catch (err) {
       applyEvent({ kind: "error", text: String(err) });
@@ -421,12 +421,18 @@ async function streamReply(
   onEvent: (ev: ChatEvent) => void,
   signal: AbortSignal,
   image?: string,
-  mode?: string
+  mode?: string,
+  visual?: VisualRegion
 ): Promise<void> {
   await fetchEventSource("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message, ...(image ? { image } : {}), ...(mode ? { mode } : {}) }),
+    body: JSON.stringify({
+      message,
+      ...(image ? { image } : {}),
+      ...(mode ? { mode } : {}),
+      ...(visual ? { visual } : {}),
+    }),
     signal,
     openWhenHidden: true, // local dev tool: don't drop the turn on a hidden tab
     async onopen(res) {

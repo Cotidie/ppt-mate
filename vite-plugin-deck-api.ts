@@ -137,7 +137,7 @@ async function handleRenameSlide(req: IncomingMessage, res: ServerResponse, next
 async function handleChat(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
   if (req.method !== "POST") return next();
   try {
-    const { message, image, mode } = await readJsonBody(req);
+    const { message, image, mode, visual } = await readJsonBody(req);
     openEventStream(res);
     // A turn needs content. Typed prose counts; so does a non-default execution
     // mode (e.g. Fix Layout), whose prepended hint IS the instruction and which
@@ -149,7 +149,7 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, next: Conne
       res.end();
       return;
     }
-    await claude.runTurn(await composeTurn(typeof message === "string" ? message : "", image, mode), res);
+    await claude.runTurn(await composeTurn(typeof message === "string" ? message : "", image, mode, visual), res);
     sendEvent(res, "done", "");
     res.end();
   } catch (err) {
@@ -495,9 +495,10 @@ const EXEC_HINTS: Record<string, string> = {
 // slide, selection, any render issues) without having to call a tool. Full detail
 // still comes from the `deck` MCP tools. When the Visual Selection tool attached a
 // crop, ride it along as an image block so the agent sees the region beside the text.
-async function composeTurn(message: string, image?: string, mode?: string): Promise<TurnContent> {
+async function composeTurn(message: string, image?: string, mode?: string, visual?: unknown): Promise<TurnContent> {
   const header = await contextHeader();
   const hint = mode ? EXEC_HINTS[mode] ?? "" : "";
+  const region = formatVisualRegion(visual);
   // Always make the agent aware of the workspace structure (tree only, no
   // contents); it reads files on demand via the read_workspace_file tool.
   let workspace = "";
@@ -507,13 +508,38 @@ async function composeTurn(message: string, image?: string, mode?: string): Prom
     /* workspace unreadable: skip the manifest */
   }
   const refs = await referencedFiles(message);
-  const text = [header, workspace, refs, hint, message].filter(Boolean).join("\n\n");
+  const text = [header, workspace, refs, region, hint, message].filter(Boolean).join("\n\n");
   if (!image) return text;
   const data = image.replace(/^data:image\/\w+;base64,/, "");
+  const note = region
+    ? "(Attached: a crop of exactly the [visual region] above; use those coordinates even if the crop is blank.)"
+    : "(Attached: a visual crop of the slide region the user selected; inspect it.)";
   return [
-    { type: "text", text: `${text}\n\n(Attached: a visual crop of the slide region the user selected; inspect it.)` },
+    { type: "text", text: `${text}\n\n${note}` },
     { type: "image", source: { type: "base64", media_type: "image/png", data } },
   ];
+}
+
+// Render a VisualRegion (from the client's selection box) as an explicit,
+// agent-readable block: a one-line header, the structured JSON, and how to use
+// it. Defensive about shape (the value is whatever the chat body carried).
+function formatVisualRegion(visual: unknown): string {
+  const v = visual as Partial<{
+    canvas: { w: number; h: number };
+    rect: { x: number; y: number; w: number; h: number };
+    center: { x: number; y: number };
+    zone: string;
+  }> | null | undefined;
+  const r = v?.rect;
+  if (!r || typeof r.x !== "number" || typeof r.w !== "number") return "";
+  const cw = v.canvas?.w ?? 13.333;
+  const ch = v.canvas?.h ?? 7.5;
+  const json = JSON.stringify({ rect: r, center: v.center, zone: v.zone });
+  return (
+    `[visual region] The user drew a selection box on the active slide. ` +
+    `Units: inches, origin top-left, canvas ${cw}x${ch}in.\n${json}\n` +
+    `Use these coordinates to place or edit elements there even if the crop looks blank.`
+  );
 }
 
 // Resolve "@path" mentions in a user message (from the chat file picker) to an

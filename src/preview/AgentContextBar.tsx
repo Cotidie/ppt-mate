@@ -5,10 +5,18 @@
 
 import { useEffect, useState } from "react";
 import type { Deck, RichText } from "../model/deck";
-import { useAgentContext, getPendingVisual, clearPendingVisual, type UiContext } from "./agentContext";
+import { useAgentContext, getPendingVisual, clearPendingVisual, type UiContext, type Rect } from "./agentContext";
+import { PX_PER_IN } from "../theme/theme";
 import deckJson from "../../deck.json";
 
 const deck = deckJson as Deck;
+
+// The visual selection's size in inches (stage px -> in), for the UI label.
+function regionSizeIn(rect: Rect): string {
+  const w = (rect.w / PX_PER_IN).toFixed(1);
+  const h = (rect.h / PX_PER_IN).toFixed(1);
+  return `${w}×${h}in`;
+}
 
 function flatten(rt: RichText | undefined): string {
   return rt ? rt.map((s) => s.text).join("") : "";
@@ -47,7 +55,7 @@ function formatContextLine(ctx: UiContext): string {
   const issues = issueMessages(ctx.render);
   if (issues.length) parts.push(`issues: ${issues.join(", ")}`);
   // Client-only (the image rides the chat turn, not the server context header).
-  if (ctx.visual) parts.push(`visual: region ${Math.round(ctx.visual.rect.w)}x${Math.round(ctx.visual.rect.h)}px attached`);
+  if (ctx.visual) parts.push(`visual: region ${regionSizeIn(ctx.visual.rect)} attached`);
   return `[context] ${parts.join("; ")}`;
 }
 
@@ -107,7 +115,7 @@ export function AgentContextBar() {
           </span>
         )}
         {visual && (
-          <span className="ctx-chip" title={`region ${Math.round(visual.rect.w)}x${Math.round(visual.rect.h)}px attached to your next message`}>
+          <span className="ctx-chip" title={`region ${regionSizeIn(visual.rect)} attached to your next message`}>
             📷 region
             <span
               className="ctx-chip-x"
