@@ -308,27 +308,21 @@ async function handleWorkspace(req: IncomingMessage, res: ServerResponse, next: 
   }
 }
 
-// POST /api/workspace/open { path } -> open a workspace file with the host's
-// default app (the dev server runs on the user's machine). Sandboxed to files/.
-// Only meaningful for local use (browser + dev server on the same host).
-async function handleWorkspaceOpen(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
-  if (req.method !== "POST") return next();
-  try {
-    const { path } = await readJsonBody(req);
-    const abs = resolveWorkspacePath(String(path ?? ""));
-    if (!abs) return sendJson(res, 400, { error: `Path is outside the workspace: ${path}` });
-    let info;
+// Shared skeleton for the POST workspace mutation routes: method guard, JSON
+// body parse, uniform 500 on throw. Each handler just maps a parsed body to a
+// { status, body } pair.
+type RouteResult = { status: number; body: unknown };
+
+function workspaceRoute(fn: (body: any) => Promise<RouteResult>) {
+  return async (req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
+    if (req.method !== "POST") return next();
     try {
-      info = await stat(abs);
-    } catch {
-      return sendJson(res, 404, { error: `No such workspace file: ${path}` });
+      const { status, body } = await fn(await readJsonBody(req));
+      sendJson(res, status, body);
+    } catch (err) {
+      sendJson(res, 500, { error: String(err) });
     }
-    if (info.isDirectory()) return sendJson(res, 400, { error: "Cannot open a directory." });
-    await open(abs); // launches the OS default app; we don't wait on the child
-    sendJson(res, 200, { ok: true });
-  } catch (err) {
-    sendJson(res, 500, { error: String(err) });
-  }
+  };
 }
 
 // A single path segment is valid as a workspace file/folder name when it is
@@ -341,87 +335,91 @@ function validWorkspaceName(raw: unknown): string | null {
   return name;
 }
 
+// Workspace-relative child path under `parent` ("" = root).
+function childPath(parent: string, name: string): string {
+  return parent ? `${parent}/${name}` : name;
+}
+
+// POST /api/workspace/open { path } -> open a workspace file with the host's
+// default app (the dev server runs on the user's machine). Sandboxed to files/.
+// Only meaningful for local use (browser + dev server on the same host).
+const handleWorkspaceOpen = workspaceRoute(async ({ path }) => {
+  const abs = resolveWorkspacePath(String(path ?? ""));
+  if (!abs) return { status: 400, body: { error: `Path is outside the workspace: ${path}` } };
+  let info;
+  try {
+    info = await stat(abs);
+  } catch {
+    return { status: 404, body: { error: `No such workspace file: ${path}` } };
+  }
+  if (info.isDirectory()) return { status: 400, body: { error: "Cannot open a directory." } };
+  await open(abs); // launches the OS default app; we don't wait on the child
+  return { status: 200, body: { ok: true } };
+});
+
 // POST /api/workspace/mkdir { parent, name } -> create a folder inside files/.
 // `parent` is "" for the workspace root. Non-recursive so a duplicate surfaces.
-async function handleWorkspaceMkdir(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
-  if (req.method !== "POST") return next();
+const handleWorkspaceMkdir = workspaceRoute(async ({ parent, name }) => {
+  const clean = validWorkspaceName(name);
+  if (!clean) return { status: 400, body: { error: "Invalid folder name." } };
+  const parentStr = String(parent ?? "");
+  if (!resolveWorkspacePath(parentStr)) return { status: 400, body: { error: "Parent is outside the workspace." } };
+  const target = resolveWorkspacePath(childPath(parentStr, clean));
+  if (!target) return { status: 400, body: { error: "Path is outside the workspace." } };
   try {
-    const { parent, name } = await readJsonBody(req);
-    const clean = validWorkspaceName(name);
-    if (!clean) return sendJson(res, 400, { error: "Invalid folder name." });
-    const parentAbs = resolveWorkspacePath(String(parent ?? ""));
-    if (!parentAbs) return sendJson(res, 400, { error: "Parent is outside the workspace." });
-    const target = resolveWorkspacePath(`${parent ? `${parent}/` : ""}${clean}`);
-    if (!target) return sendJson(res, 400, { error: "Path is outside the workspace." });
-    try {
-      await mkdir(target); // no recursive: EEXIST means it already exists
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "EEXIST") {
-        return sendJson(res, 409, { error: `"${clean}" already exists.` });
-      }
-      throw e;
+    await mkdir(target); // no recursive: EEXIST means it already exists
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      return { status: 409, body: { error: `"${clean}" already exists.` } };
     }
-    sendJson(res, 200, { ok: true });
-  } catch (err) {
-    sendJson(res, 500, { error: String(err) });
+    throw e;
   }
-}
+  return { status: 200, body: { ok: true } };
+});
 
 // POST /api/workspace/rename { path, name } -> rename a file/folder in place
 // (same parent directory), to a new single-segment name. Sandboxed to files/.
-async function handleWorkspaceRename(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
-  if (req.method !== "POST") return next();
+const handleWorkspaceRename = workspaceRoute(async ({ path, name }) => {
+  const clean = validWorkspaceName(name);
+  if (!clean) return { status: 400, body: { error: "Invalid name." } };
+  const abs = resolveWorkspacePath(String(path ?? ""));
+  if (!abs || abs === WORKSPACE_DIR) return { status: 400, body: { error: "Cannot rename this item." } };
   try {
-    const { path, name } = await readJsonBody(req);
-    const clean = validWorkspaceName(name);
-    if (!clean) return sendJson(res, 400, { error: "Invalid name." });
-    const abs = resolveWorkspacePath(String(path ?? ""));
-    if (!abs || abs === WORKSPACE_DIR) return sendJson(res, 400, { error: "Cannot rename this item." });
-    try {
-      await stat(abs);
-    } catch {
-      return sendJson(res, 404, { error: `No such item: ${path}` });
-    }
-    const slash = String(path).lastIndexOf("/");
-    const dir = slash >= 0 ? String(path).slice(0, slash) : "";
-    const target = resolveWorkspacePath(`${dir ? `${dir}/` : ""}${clean}`);
-    if (!target) return sendJson(res, 400, { error: "Path is outside the workspace." });
-    if (target !== abs) {
-      try {
-        await stat(target);
-        return sendJson(res, 409, { error: `"${clean}" already exists.` });
-      } catch {
-        /* target free: proceed */
-      }
-    }
-    await renameFs(abs, target);
-    sendJson(res, 200, { ok: true });
-  } catch (err) {
-    sendJson(res, 500, { error: String(err) });
+    await stat(abs);
+  } catch {
+    return { status: 404, body: { error: `No such item: ${path}` } };
   }
-}
+  const slash = String(path).lastIndexOf("/");
+  const dir = slash >= 0 ? String(path).slice(0, slash) : "";
+  const target = resolveWorkspacePath(childPath(dir, clean));
+  if (!target) return { status: 400, body: { error: "Path is outside the workspace." } };
+  if (target !== abs) {
+    try {
+      await stat(target);
+      return { status: 409, body: { error: `"${clean}" already exists.` } };
+    } catch {
+      /* target free: proceed */
+    }
+  }
+  await renameFs(abs, target);
+  return { status: 200, body: { ok: true } };
+});
 
 // POST /api/workspace/remove { paths: string[] } -> delete files/folders inside
 // files/ (folders recursively). Sandboxed: if any path escapes files/ or is the
 // root, the whole batch is rejected. A missing path is ignored (force).
-async function handleWorkspaceRemove(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
-  if (req.method !== "POST") return next();
-  try {
-    const { paths } = await readJsonBody(req);
-    const list = Array.isArray(paths) ? paths.map((p) => String(p)) : [];
-    if (!list.length) return sendJson(res, 400, { error: "Nothing to remove." });
-    const targets: string[] = [];
-    for (const p of list) {
-      const abs = resolveWorkspacePath(p);
-      if (!abs || abs === WORKSPACE_DIR) return sendJson(res, 400, { error: `Cannot remove: ${p}` });
-      targets.push(abs);
-    }
-    for (const abs of targets) await rm(abs, { recursive: true, force: true });
-    sendJson(res, 200, { ok: true, removed: targets.length });
-  } catch (err) {
-    sendJson(res, 500, { error: String(err) });
+const handleWorkspaceRemove = workspaceRoute(async ({ paths }) => {
+  const list = Array.isArray(paths) ? paths.map((p) => String(p)) : [];
+  if (!list.length) return { status: 400, body: { error: "Nothing to remove." } };
+  const targets: string[] = [];
+  for (const p of list) {
+    const abs = resolveWorkspacePath(p);
+    if (!abs || abs === WORKSPACE_DIR) return { status: 400, body: { error: `Cannot remove: ${p}` } };
+    targets.push(abs);
   }
-}
+  for (const abs of targets) await rm(abs, { recursive: true, force: true });
+  return { status: 200, body: { ok: true, removed: targets.length } };
+});
 
 // Content of one user turn: plain text, or text + image blocks (Anthropic
 // MessageParam content). Loosely typed; the SDK message is a MessageParam.
