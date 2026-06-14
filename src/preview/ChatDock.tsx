@@ -3,7 +3,7 @@ import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } 
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 import { AgentContextBar } from "./AgentContextBar";
 import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
-import { DEFAULT_MODE } from "./execModes";
+import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
 import { ModeSelect } from "./ModeSelect";
 
 type Role = "user" | "assistant" | "error";
@@ -68,13 +68,21 @@ export function ChatDock() {
       .catch(() => {});
   };
 
+  // A non-default execution mode is itself the instruction (it prepends a hint and
+  // the agent already has the slide context), so an empty message is allowed then.
+  // Default mode still needs typed content.
+  const canSend = !streaming && (input.trim().length > 0 || mode !== DEFAULT_MODE);
+
   const send = async () => {
+    if (!canSend) return;
     const message = input.trim();
-    if (!message || streaming) return;
     // Attach a pending Visual Selection crop, if any, to this turn (one-shot).
     const visual = getPendingVisual();
     setInput("");
-    setMessages((m) => [...m, { role: "user", text: message }, { role: "assistant", text: "" }]);
+    // When the user sent no prose, show the chosen mode as the user's request.
+    const modeLabel = EXEC_MODES.find((m) => m.id === mode)?.label ?? mode;
+    const shown = message || `▷ ${modeLabel}`;
+    setMessages((m) => [...m, { role: "user", text: shown }, { role: "assistant", text: "" }]);
     setStreaming(true);
     try {
       await streamReply(message, applyEvent, new AbortController().signal, visual?.dataUrl, mode);
@@ -176,7 +184,7 @@ export function ChatDock() {
           onKeyDown={onKeyDown}
         />
         <div className="chat-send-group">
-          <button className="chat-send" onClick={send} disabled={streaming || !input.trim()}>
+          <button className="chat-send" onClick={send} disabled={!canSend}>
             {streaming ? "…" : "Send"}
           </button>
         </div>
