@@ -16,6 +16,7 @@ import { z } from "zod";
 import prettyBytes from "pretty-bytes";
 import mimeTypes from "mime-types";
 import { isBinary } from "istextorbinary";
+import open from "open";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
@@ -77,6 +78,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/context", handleContext);
       server.middlewares.use("/api/render-result", handleRenderResult);
+      server.middlewares.use("/api/workspace/open", handleWorkspaceOpen);
       server.middlewares.use("/api/workspace", handleWorkspace);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
@@ -298,6 +300,29 @@ async function handleWorkspace(req: IncomingMessage, res: ServerResponse, next: 
   try {
     const tree = await buildWorkspaceTree();
     sendJson(res, 200, tree);
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
+// POST /api/workspace/open { path } -> open a workspace file with the host's
+// default app (the dev server runs on the user's machine). Sandboxed to files/.
+// Only meaningful for local use (browser + dev server on the same host).
+async function handleWorkspaceOpen(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "POST") return next();
+  try {
+    const { path } = await readJsonBody(req);
+    const abs = resolveWorkspacePath(String(path ?? ""));
+    if (!abs) return sendJson(res, 400, { error: `Path is outside the workspace: ${path}` });
+    let info;
+    try {
+      info = await stat(abs);
+    } catch {
+      return sendJson(res, 404, { error: `No such workspace file: ${path}` });
+    }
+    if (info.isDirectory()) return sendJson(res, 400, { error: "Cannot open a directory." });
+    await open(abs); // launches the OS default app; we don't wait on the child
+    sendJson(res, 200, { ok: true });
   } catch (err) {
     sendJson(res, 500, { error: String(err) });
   }

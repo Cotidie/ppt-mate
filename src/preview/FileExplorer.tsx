@@ -78,7 +78,14 @@ export function FileExplorer() {
             aria-label="Workspace files"
             defaultExpandedIds={defaultExpandedIds}
             nodeRenderer={({ element, isBranch, isExpanded, getNodeProps, level }) => (
-              <FileRow element={element} isBranch={isBranch} isExpanded={isExpanded} level={level} getNodeProps={getNodeProps} />
+              <FileRow
+                element={element}
+                isBranch={isBranch}
+                isExpanded={isExpanded}
+                level={level}
+                getNodeProps={getNodeProps}
+                onOpen={openFile}
+              />
             )}
           />
         )}
@@ -93,15 +100,18 @@ function FileRow({
   isExpanded,
   level,
   getNodeProps,
+  onOpen,
 }: {
   element: INode;
   isBranch: boolean;
   isExpanded: boolean;
   level: number;
   getNodeProps: () => React.HTMLAttributes<HTMLDivElement>;
+  onOpen: (path: string) => void;
 }) {
   const meta = element.metadata as Meta | undefined;
-  const title = meta ? meta.path + (meta.size != null ? ` · ${prettyBytes(meta.size)}` : "") : element.name;
+  const baseTitle = meta ? meta.path + (meta.size != null ? ` · ${prettyBytes(meta.size)}` : "") : element.name;
+  const title = isBranch ? baseTitle : `${baseTitle} — double-click to open`;
   return (
     <div
       {...getNodeProps()}
@@ -109,6 +119,10 @@ function FileRow({
       style={{ paddingLeft: 8 + (level - 1) * 12 }}
       title={title}
       data-path={meta?.path}
+      // Double-click a file -> open it with the host's default app.
+      onDoubleClick={() => {
+        if (!isBranch && meta?.path) onOpen(meta.path);
+      }}
     >
       {isBranch ? (
         <span className={"files-caret" + (isExpanded ? " open" : "")}>›</span>
@@ -118,4 +132,13 @@ function FileRow({
       <span className="files-name">{element.name}</span>
     </div>
   );
+}
+
+// Ask the dev server to open a workspace file with the host's default app.
+function openFile(path: string): void {
+  fetch("/api/workspace/open", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  }).catch(() => {});
 }
