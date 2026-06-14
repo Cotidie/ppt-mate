@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 import { Mention, MentionsInput } from "react-mentions";
@@ -7,7 +7,10 @@ import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentC
 import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
 import { ModeSelect } from "./ModeSelect";
 import { fetchTree } from "./workspaceApi";
-import { collectFiles } from "./workspaceTree";
+import { collectEntries } from "./workspaceTree";
+
+type Suggestion = { id: string; display: string };
+const MENTION_CACHE_TTL = 1500; // ms; refetch the tree at most this often while typing
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -51,31 +54,35 @@ export function ChatDock() {
   const [usage, setUsage] = useState<ApiUsage | null>(null);
   const height = useChatHeight();
   const logRef = useRef<HTMLDivElement>(null);
-  // Cached workspace file list for the "@" mention picker; refreshed on mount and
-  // on input focus so it reflects uploads / files the agent created.
-  const filesRef = useRef<string[]>([]);
-  const loadFiles = useCallback(() => {
-    fetchTree()
-      .then(collectFiles)
-      .then((f) => {
-        filesRef.current = f;
-      })
-      .catch(() => {});
-  }, []);
+  // "@" mention picker source, kept in sync with the live workspace. The tree is
+  // refetched whenever the cache is older than the TTL (and invalidated on focus),
+  // so uploads and files/folders the agent created always appear. Folders are
+  // listed too (shown with a trailing "/").
+  const entriesRef = useRef<{ at: number; items: Suggestion[] }>({ at: 0, items: [] });
+  const getEntries = async (): Promise<Suggestion[]> => {
+    if (Date.now() - entriesRef.current.at < MENTION_CACHE_TTL) return entriesRef.current.items;
+    try {
+      const items = collectEntries(await fetchTree()).map((e) => ({
+        id: e.path,
+        display: e.type === "dir" ? `${e.path}/` : e.path,
+      }));
+      entriesRef.current = { at: Date.now(), items };
+    } catch {
+      /* keep the last good list */
+    }
+    return entriesRef.current.items;
+  };
 
-  useEffect(() => {
-    loadFiles();
-  }, [loadFiles]);
+  // Invalidate so opening the picker always starts from a fresh fetch.
+  const invalidateEntries = () => {
+    entriesRef.current = { at: 0, items: entriesRef.current.items };
+    void getEntries();
+  };
 
-  // react-mentions suggestion source: filter the cached files by the typed query.
-  const fileSuggestions = (query: string, cb: (data: { id: string; display: string }[]) => void) => {
+  const fileSuggestions = async (query: string, cb: (data: Suggestion[]) => void) => {
     const q = query.toLowerCase();
-    cb(
-      filesRef.current
-        .filter((p) => p.toLowerCase().includes(q))
-        .slice(0, 50)
-        .map((p) => ({ id: p, display: p })),
-    );
+    const items = await getEntries();
+    cb(items.filter((e) => e.display.toLowerCase().includes(q)).slice(0, 50));
   };
 
   useEffect(() => {
@@ -215,14 +222,14 @@ export function ChatDock() {
             setPlain(newPlain);
           }}
           onKeyDown={onKeyDown}
-          onFocus={loadFiles}
+          onFocus={invalidateEntries}
           allowSuggestionsAboveCursor
         >
           <Mention
             trigger="@"
             data={fileSuggestions}
             markup="@[__display__](__id__)"
-            displayTransform={(id) => `@${id}`}
+            displayTransform={(_id, display) => `@${display}`}
             appendSpaceOnAdd
             className="chat-mention"
           />

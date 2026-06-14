@@ -52,14 +52,15 @@ export function pathsForIds(data: INode[], ids: Iterable<NodeId>): string[] {
     .filter((p): p is string => p != null && p !== NEW_SENTINEL);
 }
 
-// Walk a workspace tree and collect every file's relative path (depth-first,
-// dir-first order, matching how the tree is built). Folders are skipped.
-export function collectFiles(tree: TreeNode): string[] {
-  const out: string[] = [];
+// Walk a workspace tree and collect every entry (folders and files) as a flat
+// list of { path, type } in depth-first, dir-first order, mirroring how the tree
+// is built (and the per-turn manifest). Used by the chat "@" file picker.
+export function collectEntries(tree: TreeNode): { path: string; type: "dir" | "file" }[] {
+  const out: { path: string; type: "dir" | "file" }[] = [];
   const walk = (nodes: TreeNode[] | undefined) => {
     for (const n of nodes ?? []) {
+      out.push({ path: n.path, type: n.type });
       if (n.type === "dir") walk(n.children);
-      else out.push(n.path);
     }
   };
   walk(tree.children);

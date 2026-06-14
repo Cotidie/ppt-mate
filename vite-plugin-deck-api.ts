@@ -517,20 +517,21 @@ async function composeTurn(message: string, image?: string, mode?: string): Prom
 }
 
 // Resolve "@path" mentions in a user message (from the chat file picker) to an
-// explicit, validated reference line so the agent points at the exact file.
-// Only paths that actually exist as files in the workspace survive, which drops
+// explicit, validated reference line so the agent points at the exact file or
+// folder. Only paths that actually exist in the workspace survive, which drops
 // false positives like email addresses or stray "@words".
 async function referencedFiles(message: string): Promise<string> {
   const seen = new Set<string>();
   for (const m of message.matchAll(/(?:^|\s)@([\w./-]+)/g)) {
-    const rel = m[1].replace(/[.,;:)]+$/, ""); // trim trailing punctuation
+    const rel = m[1].replace(/[.,;:)]+$/, "").replace(/\/+$/, ""); // trim trailing punctuation / slash
     if (!rel || seen.has(rel)) continue;
     const abs = resolveWorkspacePath(rel);
     if (!abs || abs === WORKSPACE_DIR) continue;
     try {
-      if ((await stat(abs)).isFile()) seen.add(rel);
+      const st = await stat(abs);
+      if (st.isFile() || st.isDirectory()) seen.add(rel);
     } catch {
-      /* not a real workspace file: ignore */
+      /* not a real workspace entry: ignore */
     }
   }
   if (!seen.size) return "";
