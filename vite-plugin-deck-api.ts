@@ -7,16 +7,20 @@ import type { Plugin, Connect } from "vite";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { query, createSdkMcpServer, tool, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DECK_PATH = resolve(HERE, "deck.json");
 const THEME_PATH = resolve(HERE, "theme.json");
 const OUT_DIR = resolve(HERE, "out");
+// The app's workspace: user/agent assets (generated images, uploaded PDFs, notes).
+// The agent sees the tree every turn but reads contents only on demand.
+const WORKSPACE_DIR = resolve(HERE, "files");
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "opus";
 const CREDS_PATH = resolve(homedir(), ".claude/.credentials.json");
@@ -59,6 +63,8 @@ export function deckApi(): Plugin {
     name: "deck-api",
     configureServer(server) {
       devServer = server;
+      // Always have a workspace directory so the explorer + agent tools work.
+      void mkdir(WORKSPACE_DIR, { recursive: true }).catch(() => {});
       server.middlewares.use("/api/slides/delete", handleDeleteSlide);
       server.middlewares.use("/api/slides/rename", handleRenameSlide);
       server.middlewares.use("/api/slides/edit", handleEditSlide);
@@ -68,6 +74,7 @@ export function deckApi(): Plugin {
       server.middlewares.use("/api/footer", handleEditFooter);
       server.middlewares.use("/api/context", handleContext);
       server.middlewares.use("/api/render-result", handleRenderResult);
+      server.middlewares.use("/api/workspace", handleWorkspace);
       server.middlewares.use("/api/export", handleExport);
       server.middlewares.use("/api/account", handleAccount);
       server.middlewares.use("/api/usage", handleUsage);
@@ -174,6 +181,131 @@ async function handleRenderResult(req: IncomingMessage, res: ServerResponse, nex
   }
 }
 
+// ---------------------------------------------------------------------------
+// Workspace: a `files/` tree the agent is always aware of (a compact manifest
+// rides each turn) but whose contents it reads only on demand (MCP tools below).
+// Single source of truth: the tree feeds the UI explorer, the turn manifest, and
+// the list_workspace tool.
+// ---------------------------------------------------------------------------
+type TreeNode = {
+  name: string;
+  path: string; // relative to files/, POSIX separators
+  type: "dir" | "file";
+  size?: number;
+  mtime?: number; // epoch ms
+  children?: TreeNode[];
+  truncated?: boolean; // dir had more entries than the cap
+  summary?: string; // reserved: future generated per-file summary (unused in v1)
+};
+
+const WS_MAX_DEPTH = 5;
+const WS_MAX_ENTRIES = 300;
+
+// Recursive readdir+stat under files/, depth- and entry-capped so a huge tree
+// can't blow up the response or the turn header. Dirs sorted before files.
+async function buildWorkspaceTree(): Promise<TreeNode> {
+  const root: TreeNode = { name: "files", path: "", type: "dir", children: [] };
+  let budget = WS_MAX_ENTRIES;
+  async function walk(absDir: string, relDir: string, depth: number): Promise<TreeNode[]> {
+    if (depth > WS_MAX_DEPTH || budget <= 0) return [];
+    let entries;
+    try {
+      entries = await readdir(absDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    entries.sort((a, b) => {
+      const ad = a.isDirectory() ? 0 : 1;
+      const bd = b.isDirectory() ? 0 : 1;
+      return ad - bd || a.name.localeCompare(b.name);
+    });
+    const out: TreeNode[] = [];
+    for (const e of entries) {
+      if (budget <= 0) {
+        out.push({ name: "…", path: relDir, type: "file", truncated: true });
+        break;
+      }
+      budget--;
+      const rel = relDir ? `${relDir}/${e.name}` : e.name;
+      const abs = resolve(absDir, e.name);
+      if (e.isDirectory()) {
+        out.push({ name: e.name, path: rel, type: "dir", children: await walk(abs, rel, depth + 1) });
+      } else if (e.isFile()) {
+        let size: number | undefined;
+        let mtime: number | undefined;
+        try {
+          const s = await stat(abs);
+          size = s.size;
+          mtime = s.mtimeMs;
+        } catch {
+          /* unreadable: list it without metadata */
+        }
+        out.push({ name: e.name, path: rel, type: "file", size, mtime });
+      }
+    }
+    return out;
+  }
+  root.children = await walk(WORKSPACE_DIR, "", 1);
+  return root;
+}
+
+// Flatten the tree to a compact one-line-per-entry manifest for the turn header.
+// Lists up to `limit` entries (dir-first, depth order), then "… N more". Never
+// includes file contents - just structure + metadata.
+function workspaceManifest(tree: TreeNode, limit = 60): string {
+  const lines: string[] = [];
+  let total = 0;
+  const walk = (nodes: TreeNode[] | undefined, depth: number) => {
+    for (const n of nodes ?? []) {
+      total++;
+      if (lines.length < limit) {
+        const indent = "  ".repeat(depth);
+        if (n.type === "dir") lines.push(`${indent}${n.name}/`);
+        else {
+          const meta = [n.size != null ? fmtBytes(n.size) : null, n.mtime ? fmtDate(n.mtime) : null]
+            .filter(Boolean)
+            .join(", ");
+          lines.push(`${indent}${n.name}${meta ? ` (${meta})` : ""}`);
+        }
+      }
+      if (n.type === "dir") walk(n.children, depth + 1);
+    }
+  };
+  walk(tree.children, 0);
+  if (!lines.length) return "[workspace] files/ is empty";
+  const more = total > limit ? `\n  … ${total - limit} more` : "";
+  return `[workspace] files/\n${lines.join("\n")}${more}`;
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function fmtDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// Resolve a workspace-relative path to an absolute one, refusing anything that
+// escapes files/ (path traversal). Returns null if outside the sandbox.
+function resolveWorkspacePath(rel: string): string | null {
+  const abs = resolve(WORKSPACE_DIR, rel);
+  if (abs !== WORKSPACE_DIR && !abs.startsWith(WORKSPACE_DIR + "/")) return null;
+  return abs;
+}
+
+// GET /api/workspace -> the file tree (consumed by the explorer UI).
+async function handleWorkspace(req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) {
+  if (req.method !== "GET") return next();
+  try {
+    const tree = await buildWorkspaceTree();
+    sendJson(res, 200, tree);
+  } catch (err) {
+    sendJson(res, 500, { error: String(err) });
+  }
+}
+
 // Content of one user turn: plain text, or text + image blocks (Anthropic
 // MessageParam content). Loosely typed; the SDK message is a MessageParam.
 type TurnContent = string | Array<Record<string, unknown>>;
@@ -197,7 +329,15 @@ const EXEC_HINTS: Record<string, string> = {
 async function composeTurn(message: string, image?: string, mode?: string): Promise<TurnContent> {
   const header = await contextHeader();
   const hint = mode ? EXEC_HINTS[mode] ?? "" : "";
-  const text = [header, hint, message].filter(Boolean).join("\n\n");
+  // Always make the agent aware of the workspace structure (tree only, no
+  // contents); it reads files on demand via the read_workspace_file tool.
+  let workspace = "";
+  try {
+    workspace = workspaceManifest(await buildWorkspaceTree());
+  } catch {
+    /* workspace unreadable: skip the manifest */
+  }
+  const text = [header, workspace, hint, message].filter(Boolean).join("\n\n");
   if (!image) return text;
   const data = image.replace(/^data:image\/\w+;base64,/, "");
   return [
@@ -443,6 +583,48 @@ const deckMcp = createSdkMcpServer({
           return textResult({ error: "Couldn't capture the slide - is the preview open in the browser?" });
         }
         return imageResult(dataUrl);
+      },
+    ),
+    tool(
+      "list_workspace",
+      "List the workspace (the files/ directory): the full file tree with metadata (name, type, size, modified time). The agent is already given a compact version of this each turn; call this when you want the complete, current tree.",
+      {},
+      async () => {
+        const tree = await buildWorkspaceTree();
+        return textResult(tree);
+      },
+    ),
+    tool(
+      "read_workspace_file",
+      "Read one file from the workspace (files/) by its relative path (e.g. \"notes/example.md\"). Text files return their text; images return a viewable image. Use this only when you actually need a file's contents - the tree alone is given to you every turn.",
+      { path: z.string().describe("Path relative to the files/ workspace directory, e.g. \"notes/example.md\".") },
+      async ({ path }) => {
+        const abs = resolveWorkspacePath(path);
+        if (!abs) return textResult({ error: `Path is outside the workspace: ${path}` });
+        let info;
+        try {
+          info = await stat(abs);
+        } catch {
+          return textResult({ error: `No such workspace file: ${path}` });
+        }
+        if (info.isDirectory()) return textResult({ error: `${path} is a directory; use list_workspace.` });
+        const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+        const imageMime: Record<string, string> = {
+          ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".gif": "image/gif", ".webp": "image/webp",
+        };
+        if (imageMime[ext]) {
+          const b64 = (await readFile(abs)).toString("base64");
+          return { content: [{ type: "image" as const, data: b64, mimeType: imageMime[ext] }] };
+        }
+        const MAX_TEXT = 200_000; // ~200KB cap; bigger/binary files aren't dumped
+        if (info.size > MAX_TEXT) {
+          return textResult({ error: `${path} is ${fmtBytes(info.size)}; too large to read inline.` });
+        }
+        const buf = await readFile(abs);
+        // Heuristic binary guard: a NUL byte means it isn't text.
+        if (buf.includes(0)) return textResult({ error: `${path} looks binary; not shown.` });
+        return textResult({ path, size: info.size, content: buf.toString("utf8") });
       },
     ),
   ],

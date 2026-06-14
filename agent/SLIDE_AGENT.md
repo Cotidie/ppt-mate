@@ -58,6 +58,21 @@ If a `[context]` line flags an issue (e.g. text overflowing its box, an element 
 canvas), treat fixing it as in scope when relevant: trim or tighten the text,
 adjust a type-size token, resize/move the box, or move to a roomier layout.
 
+## Workspace files
+
+There is a `files/` **workspace** directory for user/agent assets: generated
+images, uploaded PDFs used as context, notes, and other files.
+
+- You are given a compact **workspace tree** (a `[workspace]` block) at the start of
+  every turn, so you always know what files exist and their size / modified time.
+  This is structure only - it never includes file contents.
+- To read a file, call `mcp__deck__read_workspace_file` with its path relative to
+  `files/` (e.g. `notes/example.md`). Text comes back as text; images come back as a
+  viewable image. Read a file only when you actually need its contents.
+- For the complete, current tree (more than the per-turn summary), call
+  `mcp__deck__list_workspace`.
+- Paths are sandboxed to `files/`; you cannot read outside it with these tools.
+
 ## Replies
 
 Be concise by default. The chat dock is small, so every line costs space.
