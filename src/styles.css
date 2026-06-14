@@ -987,6 +987,7 @@ body.gesture-active * {
 
 .chat-input-row {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 8px 14px 12px;
   border-top: 1px solid #2a2f3a;
@@ -997,7 +998,6 @@ body.gesture-active * {
    bottom so a multi-line textarea grows up. */
 .mode-trigger {
   flex: 0 0 auto;
-  align-self: flex-end;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1124,17 +1124,19 @@ body.gesture-active * {
 
 .chat-send-group {
   flex: 0 0 auto;
-  align-self: flex-end;
   display: flex;
 }
 
 .chat-send {
+  height: 35px;
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: #3b6fd4;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
-  padding: 8px 16px;
+  padding: 0 16px;
   border-radius: 8px;
 }
 
