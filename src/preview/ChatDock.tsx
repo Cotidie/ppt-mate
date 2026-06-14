@@ -3,7 +3,8 @@ import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } 
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
 import { AgentContextBar } from "./AgentContextBar";
 import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
-import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
+import { DEFAULT_MODE } from "./execModes";
+import { ModeSelect } from "./ModeSelect";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -164,20 +165,7 @@ export function ChatDock() {
       </div>
       <AgentContextBar />
       <div className="chat-input-row">
-        <select
-          className="chat-mode"
-          value={mode}
-          disabled={streaming}
-          onChange={(e) => setMode(e.target.value)}
-          title="Execution mode: an explicit hint sent with your message"
-          aria-label="Execution mode"
-        >
-          {EXEC_MODES.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        <ModeSelect mode={mode} onChange={setMode} disabled={streaming} />
         <textarea
           className="chat-input"
           placeholder="Ask Claude Code to edit slides, or anything…"

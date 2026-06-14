@@ -992,30 +992,115 @@ body.gesture-active * {
   border-top: 1px solid #2a2f3a;
 }
 
-/* Execution-mode selector: a compact chip-style <select> at the left of the input
-   row. Sits flush with the input/Send bottom so a multi-line textarea grows up. */
-.chat-mode {
+/* Execution-mode selector (Radix DropdownMenu): a pill-style trigger at the left
+   of the input row, opening a popover menu above. Sits flush with the input/Send
+   bottom so a multi-line textarea grows up. */
+.mode-trigger {
   flex: 0 0 auto;
   align-self: flex-end;
-  max-width: 130px;
-  padding: 8px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 35px;
+  padding: 0 9px;
   border: 1px solid #353b48;
-  border-radius: 8px;
+  border-radius: 999px;
   background: #262b35;
   color: #c6ccd8;
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   outline: none;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 
-.chat-mode:focus {
-  border-color: #3b6fd4;
+.mode-trigger:hover:not(:disabled),
+.mode-trigger[data-state="open"] {
+  background: #2d3950;
+  border-color: #4a5160;
+  color: #e7eaf0;
 }
 
-.chat-mode:disabled {
+.mode-trigger:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.mode-trigger .mode-icon {
+  color: #6f86c4;
+}
+
+.mode-trigger .mode-caret {
+  color: #8b93a3;
+  transition: transform 0.12s ease;
+}
+
+.mode-trigger[data-state="open"] .mode-caret {
+  transform: rotate(180deg);
+}
+
+.mode-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Popover menu */
+.mode-menu {
+  min-width: 180px;
+  padding: 5px;
+  border: 1px solid #353b48;
+  border-radius: 10px;
+  background: #1c212b;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 300;
+  animation: mode-menu-in 0.12s ease;
+}
+
+@keyframes mode-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.mode-menu-label {
+  padding: 4px 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+}
+
+.mode-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #c6ccd8;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.mode-item[data-highlighted] {
+  background: #2d3950;
+  color: #fff;
+}
+
+.mode-item[data-state="checked"] {
+  color: #e7eaf0;
+}
+
+.mode-item-check {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: #6f86c4;
 }
 
 .chat-input {
