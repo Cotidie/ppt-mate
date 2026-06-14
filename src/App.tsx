@@ -141,9 +141,7 @@ export default function App() {
               aria-orientation="horizontal"
               title="Drag to resize the file explorer"
               onPointerDown={railSplit.onDragStart}
-            >
-              <span className="resizer-grip resizer-grip-h" aria-hidden="true" />
-            </div>
+            />
             <div className="rail-files" style={{ height: railSplit.value }}>
               <FileExplorer />
             </div>
