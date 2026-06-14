@@ -389,16 +389,20 @@ body.gesture-active * {
 .files-row:hover {
   background: #262b35;
 }
-.files-row:focus {
+/* Keyboard focus is a ring, kept distinct from the selection fill below.
+   Sharing one background made a Ctrl/⌘+click-deselected row keep the focus and
+   still look selected until focus moved away on the next click. Folders carry the
+   focus on the wrapping li.tree-branch-wrapper, leaves on the .files-row itself. */
+.files-row:focus,
+.tree-branch-wrapper:focus > .files-row {
   outline: none;
+  box-shadow: inset 0 0 0 1px #3d4a63;
 }
-/* Selected/focused row. For leaf nodes getNodeProps puts role=treeitem +
+/* Selected row fill. For leaf nodes getNodeProps puts role=treeitem +
    aria-selected on the .files-row div; for folders the library puts them on the
    wrapping li.tree-branch-wrapper, so highlight that case too. */
 .files-row[aria-selected="true"],
-.files-row:focus,
-.tree-branch-wrapper[aria-selected="true"] > .files-row,
-.tree-branch-wrapper:focus > .files-row {
+.tree-branch-wrapper[aria-selected="true"] > .files-row {
   background: #2d3950;
 }
 
