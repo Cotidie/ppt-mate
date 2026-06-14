@@ -506,13 +506,35 @@ async function composeTurn(message: string, image?: string, mode?: string): Prom
   } catch {
     /* workspace unreadable: skip the manifest */
   }
-  const text = [header, workspace, hint, message].filter(Boolean).join("\n\n");
+  const refs = await referencedFiles(message);
+  const text = [header, workspace, refs, hint, message].filter(Boolean).join("\n\n");
   if (!image) return text;
   const data = image.replace(/^data:image\/\w+;base64,/, "");
   return [
     { type: "text", text: `${text}\n\n(Attached: a visual crop of the slide region the user selected; inspect it.)` },
     { type: "image", source: { type: "base64", media_type: "image/png", data } },
   ];
+}
+
+// Resolve "@path" mentions in a user message (from the chat file picker) to an
+// explicit, validated reference line so the agent points at the exact file.
+// Only paths that actually exist as files in the workspace survive, which drops
+// false positives like email addresses or stray "@words".
+async function referencedFiles(message: string): Promise<string> {
+  const seen = new Set<string>();
+  for (const m of message.matchAll(/(?:^|\s)@([\w./-]+)/g)) {
+    const rel = m[1].replace(/[.,;:)]+$/, ""); // trim trailing punctuation
+    if (!rel || seen.has(rel)) continue;
+    const abs = resolveWorkspacePath(rel);
+    if (!abs || abs === WORKSPACE_DIR) continue;
+    try {
+      if ((await stat(abs)).isFile()) seen.add(rel);
+    } catch {
+      /* not a real workspace file: ignore */
+    }
+  }
+  if (!seen.size) return "";
+  return `[referenced files] ${[...seen].join(", ")}`;
 }
 
 async function contextHeader(): Promise<string> {

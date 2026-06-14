@@ -1379,6 +1379,74 @@ body.gesture-active * {
   border-color: #3b6fd4;
 }
 
+/* react-mentions input: the "@" file picker. Styled to read like .chat-input;
+   the highlighter sits behind the textarea and only paints the mention chips. */
+.chat-mentions {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+}
+.chat-mentions__input,
+.chat-mentions__highlighter {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 35px;
+  max-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid #353b48;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: auto !important;
+}
+.chat-mentions__input {
+  background: #262b35;
+  color: #e7eaf0;
+  outline: none;
+  resize: none;
+}
+.chat-mentions__input::placeholder {
+  color: #6b7280;
+}
+.chat-mentions__input:focus {
+  border-color: #3b6fd4;
+}
+/* Highlighter text is transparent (the textarea shows the real text); only the
+   mention substring gets a chip behind it. */
+.chat-mention {
+  background: #2d3950;
+  border-radius: 4px;
+}
+/* Caret-anchored suggestions dropdown. react-mentions sets the position inline;
+   we style the look. */
+.chat-mentions__suggestions {
+  z-index: 30;
+}
+.chat-mentions__suggestions__list {
+  min-width: 220px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px;
+  background: #1e222b;
+  border: 1px solid #353b48;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12.5px;
+}
+.chat-mentions__suggestions__item {
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #c6ccd8;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-mentions__suggestions__item--focused {
+  background: #2d3950;
+  color: #e7eaf0;
+}
+
 .chat-send-group {
   flex: 0 0 auto;
   display: flex;

@@ -52,6 +52,20 @@ export function pathsForIds(data: INode[], ids: Iterable<NodeId>): string[] {
     .filter((p): p is string => p != null && p !== NEW_SENTINEL);
 }
 
+// Walk a workspace tree and collect every file's relative path (depth-first,
+// dir-first order, matching how the tree is built). Folders are skipped.
+export function collectFiles(tree: TreeNode): string[] {
+  const out: string[] = [];
+  const walk = (nodes: TreeNode[] | undefined) => {
+    for (const n of nodes ?? []) {
+      if (n.type === "dir") walk(n.children);
+      else out.push(n.path);
+    }
+  };
+  walk(tree.children);
+  return out;
+}
+
 // Return a copy of the tree with a placeholder folder appended under `parent`
 // ("" = root), so the create input renders at that position in the tree.
 export function injectPlaceholder(nodes: TreeNode[], parent: string): TreeNode[] {

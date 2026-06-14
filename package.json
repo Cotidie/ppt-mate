@@ -27,6 +27,7 @@
     "@tiptap/pm": "^3.26.1",
     "@tiptap/react": "^3.26.1",
     "@types/mime-types": "^3.0.1",
+    "@types/react-mentions": "^4.4.1",
     "html-to-image": "^1.11.13",
     "istextorbinary": "^9.5.0",
     "mime-types": "^3.0.2",
@@ -36,6 +37,7 @@
     "react-accessible-treeview": "^2.11.2",
     "react-colorful": "^5.7.0",
     "react-dom": "^18.3.1",
+    "react-mentions": "^4.4.10",
     "zod": "^4.4.3"
   },
   "devDependencies": {

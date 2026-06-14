@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { fetchEventSource, EventStreamContentType } from "@microsoft/fetch-event-source";
+import { Mention, MentionsInput } from "react-mentions";
 import { AgentContextBar } from "./AgentContextBar";
 import { getPendingVisual, clearPendingVisual, getSlideCapturer } from "./agentContext";
 import { EXEC_MODES, DEFAULT_MODE } from "./execModes";
 import { ModeSelect } from "./ModeSelect";
+import { fetchTree } from "./workspaceApi";
+import { collectFiles } from "./workspaceTree";
 
 type Role = "user" | "assistant" | "error";
 type Message = { role: Role; text: string };
@@ -39,7 +42,8 @@ const HEIGHT_KEY = "ppt.chatHeight";
 // that process.
 export function ChatDock() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+  const [value, setValue] = useState(""); // react-mentions markup value
+  const [plain, setPlain] = useState(""); // plain text actually sent
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState<string>(DEFAULT_MODE);
   const [account, setAccount] = useState<Account | null>(null);
@@ -47,6 +51,32 @@ export function ChatDock() {
   const [usage, setUsage] = useState<ApiUsage | null>(null);
   const height = useChatHeight();
   const logRef = useRef<HTMLDivElement>(null);
+  // Cached workspace file list for the "@" mention picker; refreshed on mount and
+  // on input focus so it reflects uploads / files the agent created.
+  const filesRef = useRef<string[]>([]);
+  const loadFiles = useCallback(() => {
+    fetchTree()
+      .then(collectFiles)
+      .then((f) => {
+        filesRef.current = f;
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadFiles();
+  }, [loadFiles]);
+
+  // react-mentions suggestion source: filter the cached files by the typed query.
+  const fileSuggestions = (query: string, cb: (data: { id: string; display: string }[]) => void) => {
+    const q = query.toLowerCase();
+    cb(
+      filesRef.current
+        .filter((p) => p.toLowerCase().includes(q))
+        .slice(0, 50)
+        .map((p) => ({ id: p, display: p })),
+    );
+  };
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -71,14 +101,15 @@ export function ChatDock() {
   // A non-default execution mode is itself the instruction (it prepends a hint and
   // the agent already has the slide context), so an empty message is allowed then.
   // Default mode still needs typed content.
-  const canSend = !streaming && (input.trim().length > 0 || mode !== DEFAULT_MODE);
+  const canSend = !streaming && (plain.trim().length > 0 || mode !== DEFAULT_MODE);
 
   const send = async () => {
     if (!canSend) return;
-    const message = input.trim();
+    const message = plain.trim();
     // Attach a pending Visual Selection crop, if any, to this turn (one-shot).
     const visual = getPendingVisual();
-    setInput("");
+    setValue("");
+    setPlain("");
     // When the user sent no prose, show the chosen mode as the user's request.
     const modeLabel = EXEC_MODES.find((m) => m.id === mode)?.label ?? mode;
     const shown = message || `▷ ${modeLabel}`;
@@ -118,7 +149,7 @@ export function ChatDock() {
       }));
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (e: KeyboardEvent) => {
     e.stopPropagation(); // keep arrows from flipping slides while typing
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -174,15 +205,28 @@ export function ChatDock() {
       <AgentContextBar />
       <div className="chat-input-row">
         <ModeSelect mode={mode} onChange={setMode} disabled={streaming} />
-        <textarea
-          className="chat-input"
-          placeholder="Ask Claude Code to edit slides, or anything…"
-          value={input}
+        <MentionsInput
+          className="chat-mentions"
+          placeholder="Ask Claude Code to edit slides, or anything… (@ to reference a file)"
+          value={value}
           disabled={streaming}
-          rows={1}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(_e, newValue, newPlain) => {
+            setValue(newValue);
+            setPlain(newPlain);
+          }}
           onKeyDown={onKeyDown}
-        />
+          onFocus={loadFiles}
+          allowSuggestionsAboveCursor
+        >
+          <Mention
+            trigger="@"
+            data={fileSuggestions}
+            markup="@[__display__](__id__)"
+            displayTransform={(id) => `@${id}`}
+            appendSpaceOnAdd
+            className="chat-mention"
+          />
+        </MentionsInput>
         <div className="chat-send-group">
           <button className="chat-send" onClick={send} disabled={!canSend}>
             {streaming ? "…" : "Send"}
